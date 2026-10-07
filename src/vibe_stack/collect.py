@@ -46,6 +46,7 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
     if not raw:
         summary["reason"] = "нет кандидатов: источники ничего не вернули"
         log.info(summary["reason"])
+        _glossary_step(rt, summary)  # «Слово дня» от источников новостей не зависит
         return summary
 
     passed: list[Candidate] = []
@@ -100,13 +101,7 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
         summary["reason"] = "сегодня ничего не прошло отбор"
         log.info("публикаций из сбора ноль: %s", summary["reason"])
     if not board_failed and not summary["stopped"]:
-        try:
-            summary["glossary"] = run_glossary(rt)
-        except BudgetExceeded as e:
-            summary["glossary"] = {"status": f"stopped: {e}"}
-        except BoardUnavailable as e:
-            board_failed = True
-            rt.notifier.notify(f"«Слово дня» не подготовлено: {e}")
+        board_failed = _glossary_step(rt, summary)
     if not board_failed:  # при сбое Notion второй cron-запуск дня попробует ещё раз
         rt.mark_done(done_key)
     return summary
@@ -182,3 +177,15 @@ def process_candidate(rt: Runtime, c: Candidate, rubrics: dict[str, Rubric]) -> 
     decision = "queued" if status == Status.APPROVED else "pending_approval"
     rt.decision(CONTOUR, c, "board", decision, [], rubric=g.rubric, score_total=g.total, detail={"ref": ref})
     return decision
+
+
+def _glossary_step(rt: Runtime, summary: dict[str, Any]) -> bool:
+    """Готовит «Слово дня». True — Notion недоступен (сбор тогда не отмечается выполненным)."""
+    try:
+        summary["glossary"] = run_glossary(rt)
+    except BudgetExceeded as e:
+        summary["glossary"] = {"status": f"stopped: {e}"}
+    except BoardUnavailable as e:
+        rt.notifier.notify(f"«Слово дня» не подготовлено: {e}")
+        return True
+    return False

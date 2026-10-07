@@ -31,9 +31,9 @@ class FakeGlossaryPage:
     def __init__(self) -> None:
         self.synced: list[list[str]] = []
 
-    def sync(self, entries) -> str:
-        self.synced.append([e["term"] for e in entries])
-        return "https://telegra.ph/Slovar-Vibe-Stack"
+    def sync(self, entries) -> tuple[str, int]:
+        self.synced.append(sorted(e["term"] for e in entries))
+        return "https://telegra.ph/Slovar-Vibe-Stack", 0
 
 
 def make_rt(cfg, tmp_path, now, terms, responses=None) -> Runtime:
@@ -90,3 +90,94 @@ def test_glossary_posts_do_not_go_stale(cfg, tmp_path, now) -> None:
                                        found_at=now - timedelta(days=20)))
     assert run_publish(rt)["status"] == "published"
     assert rt.board.get(ref).status == Status.PUBLISHED
+
+
+def test_telegraph_page_content_and_call() -> None:
+    import json
+
+    import httpx
+
+    from vibe_stack.glossary_page import TelegraphPage, build_nodes
+
+    entries = [{"term": "RAG", "definition": "d2", "source_url": "https://w.org/rag", "post_url": None,
+                "published_at": "2026-10-01T09:00:00+00:00"},
+               {"term": "MCP", "definition": "d1", "source_url": "https://m.io", "post_url": "https://t.me/v/5",
+                "published_at": "2026-10-02T09:00:00+00:00"}]
+    nodes, dropped = build_nodes(entries)
+    assert dropped == 0
+    assert [n["children"][0] for n in nodes if n["tag"] == "h4"] == ["MCP", "RAG"]
+    tags = {n["tag"] for n in nodes} | {c["tag"] for n in nodes for c in n["children"] if isinstance(c, dict)}
+    assert tags <= {"p", "h4", "a"}  # только теги, которые разрешает Telegraph
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["path"] = req.url.path
+        seen["form"] = dict(httpx.QueryParams(req.content.decode()))
+        return httpx.Response(200, json={"ok": True, "result": {"url": "https://telegra.ph/Slovar-10-07"}})
+
+    page = TelegraphPage("tok", "Slovar-10-07", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert page.sync(entries) == ("https://telegra.ph/Slovar-10-07", 0)
+    assert seen["path"] == "/editPage/Slovar-10-07"
+    assert json.loads(seen["form"]["content"]) == nodes
+
+
+def test_page_drops_oldest_terms_when_over_limit() -> None:
+    from vibe_stack.glossary_page import MAX_DEFINITION, build_nodes
+
+    entries = [{"term": f"T{i:03d}", "definition": "слово " * 400, "source_url": f"https://s.org/{i}",
+                "post_url": None, "published_at": f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}T09:00:00+00:00"}
+               for i in range(200)]
+    nodes, dropped = build_nodes(entries)
+    shown = [n["children"][0] for n in nodes if n["tag"] == "h4"]
+    assert dropped > 0 and len(shown) == 200 - dropped
+    assert "T199" in shown and "T000" not in shown  # уходят самые старые, а не конец алфавита
+    assert all(len(n["children"][0]) <= MAX_DEFINITION + 1 for n in nodes[2::3])
+
+
+def test_definition_is_only_verified_g_claims(cfg, tmp_path, now) -> None:
+    resp = mcp_responses()
+    cid = term_candidate(MCP).id
+    resp[("glossary", cid)]["example"] = "Пример из практики"
+    resp[("verify", cid)]["checks"].append({"claim": "Пример из практики", "status": "supported", "evidence": "x"})
+    resp[("verify", cid)]["checks"].append({"claim": "Выдумка модели", "status": "supported", "evidence": "x"})
+    rt = make_rt(cfg, tmp_path, now, [MCP], resp)
+    run_glossary(rt)
+    run_publish(rt)
+    (entry,) = rt.state.glossary_entries()
+    assert "Пример" not in entry["definition"] and "Выдумка" not in entry["definition"]
+    assert "открытый протокол" in entry["definition"]
+
+
+def test_lost_state_does_not_repeat_term(cfg, tmp_path, now) -> None:
+    from vibe_stack.board import GlossaryEntry
+
+    rt = make_rt(cfg, tmp_path, now, [MCP, RAG])
+    rt.board.add_glossary(GlossaryEntry(term="MCP", definition="d", source_url=MCP.source, published_at=now))
+    assert [t.term for t in pick_terms(rt)] == ["RAG"]  # SQLite пуст, но в Notion термин уже есть
+    rt.board.add_post(PostRecord(title="Слово дня: RAG", rubric="glossary", status=Status.SENDING, html="x"))
+    assert pick_terms(rt) == []  # вышел ли пост — неизвестно: повторно не готовим
+
+
+def test_page_is_rebuilt_from_notion_too(cfg, tmp_path, now) -> None:
+    from vibe_stack.board import GlossaryEntry
+
+    rt = make_rt(cfg, tmp_path, now, [MCP], mcp_responses())
+    rt.board.add_glossary(GlossaryEntry(term="RAG", definition="d", source_url=RAG.source, published_at=now))
+    run_glossary(rt)
+    run_publish(rt)
+    assert rt.glossary_page.synced == [["MCP", "RAG"]]  # после потери state страница не теряет терминов
+
+
+def test_no_terms_left_notifies_once_a_week(cfg, tmp_path, now) -> None:
+    rt = make_rt(cfg, tmp_path, now, [])
+    assert run_glossary(rt)["status"] == "no_terms_left"
+    assert run_glossary(rt)["status"] == "no_terms_left"
+    assert len([m for m in rt.notifier.sent if "нет доступных терминов" in m]) == 1
+
+
+def test_mentions_are_whole_words_in_visible_text() -> None:
+    from vibe_stack.glossary import mentions, visible_text
+
+    text = visible_text('Новый storage и webhook <a href="https://x.dev/rag">ссылка</a> #skill')
+    assert not mentions(text, "RAG") and not mentions(text, "hook") and not mentions(text, "Skill")
+    assert mentions(visible_text("LLM-агент для кода"), "LLM")

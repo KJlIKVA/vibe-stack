@@ -20,6 +20,8 @@ SECRET_ENV_NAMES = (
     "NOTION_TOKEN",
     "NOTION_ROOT_PAGE_ID",
     "GITHUB_TOKEN",
+    "TELEGRAPH_TOKEN",
+    "AA_API_KEY",
 )
 
 
@@ -39,7 +41,10 @@ class LLMConfig(BaseModel):
     provider: Literal["openai"] = "openai"
     base_url: str | None = None
     max_calls_per_run: int = 60
-    daily_budget_usd: float = 3.0
+    daily_budget_usd: float | None = 3.0  # None — без лимита в долларах
+    # модель → токенов за сутки UTC (вход + выход, включая рассуждение); вызов, который может выйти за лимит,
+    # не делается. Сутки по UTC — как сбрасываются дневные лимиты OpenAI.
+    daily_token_limits: dict[str, int] = Field(default_factory=dict)
     request_timeout_s: float = 180
     max_attempts: int = 2  # попытки на один вызов; каждая учитывается в лимите и бюджете
     prices_per_1m: dict[str, Price] = Field(default_factory=dict)
@@ -124,7 +129,17 @@ class GlossaryTerm(BaseModel):
 
 class GlossaryConfig(BaseModel):
     telegraph_page: bool = True
+    telegraph_path: str = ""  # путь страницы на telegra.ph (публичный); токен — секрет TELEGRAPH_TOKEN
+    telegraph_url: str = ""
     terms: list[GlossaryTerm] = Field(default_factory=list)
+
+
+class LeaderboardConfig(BaseModel):
+    key: str
+    type: Literal["arena_hf", "artificial_analysis"]
+    label: str
+    dataset_config: str | None = None
+    enabled: bool = True
 
 
 class Rubric(BaseModel):
@@ -168,6 +183,7 @@ class Config(BaseModel):
     prefilter: Prefilter = Field(default_factory=Prefilter)
     rubrics: dict[str, Rubric]
     glossary: GlossaryConfig = Field(default_factory=GlossaryConfig)
+    leaderboards: list[LeaderboardConfig] = Field(default_factory=list)
     sources: list[SourceConfig] = Field(default_factory=list)
 
     def rubric(self, key: str) -> Rubric:

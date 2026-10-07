@@ -75,3 +75,54 @@ def test_pause_blocks_pin(cfg, tmp_path, now) -> None:
     rt.board.set_settings(pause=True)
     assert run_pin(rt, [arena(["A", "B", "C"])])["status"] == "paused"
     assert rt.tg.sent == []
+
+
+def test_pin_failure_does_not_repost(cfg, tmp_path, now) -> None:
+    rt = make_rt(cfg, tmp_path, now)
+    real_pin = rt.tg.pin_chat_message
+
+    def no_rights(*a, **k):
+        raise TelegramError("pinChatMessage: 400 Bad Request: not enough rights to pin a message", retryable=False)
+
+    rt.tg.pin_chat_message = no_rights
+    for _ in range(3):  # прав на закрепление нет — сообщение отправлено один раз, а не каждый запуск
+        assert run_pin(rt, [arena(["A", "B", "C"])])["status"] == "telegram_error"
+    assert len(rt.tg.sent) == 1 and rt.tg.edited == []
+    rt.tg.pin_chat_message = real_pin  # права выдали — следующий запуск только закрепляет
+    assert run_pin(rt, [arena(["A", "B", "C"])])["status"] == "pinned"
+    assert len(rt.tg.sent) == 1 and rt.tg.pinned == [-1]
+    assert run_pin(rt, [arena(["A", "B", "C"])])["status"] == "unchanged"
+
+
+def test_lost_state_adopts_pinned_navigator(cfg, tmp_path, now) -> None:
+    rt = make_rt(cfg, tmp_path, now)
+    run_pin(rt, [arena(["A", "B", "C"])])
+    rt.state.db.execute("DELETE FROM kv WHERE key LIKE 'pin:%'")  # как после потери ветки state
+    s = run_pin(rt, [arena(["X", "Y", "Z"], date="2026-10-07")])
+    assert s["status"] == "edited" and len(rt.tg.sent) == 1  # второй навигатор не появился
+
+
+def test_unpinned_and_deleted_pin_is_recreated_even_without_changes(cfg, tmp_path, now) -> None:
+    rt = make_rt(cfg, tmp_path, now)
+    run_pin(rt, [arena(["A", "B", "C"])])
+    rt.tg.pinned.clear()  # навигатор удалили вручную: в канале ничего не закреплено
+    real_pin = rt.tg.pin_chat_message
+
+    def pin(chat_id, message_id):
+        if message_id == -1:
+            raise TelegramError("pinChatMessage: 400 Bad Request: message to pin not found", retryable=False)
+        real_pin(chat_id, message_id)
+
+    rt.tg.pin_chat_message = pin
+    s = run_pin(rt, [arena(["A", "B", "C"])])
+    assert s["status"] == "created_and_pinned" and rt.tg.pinned == [-2]
+
+
+def test_analysis_is_approve_only_even_if_notion_says_auto(cfg, tmp_path, now) -> None:
+    from vibe_stack.board import RubricOverride
+
+    rt = make_rt(cfg, tmp_path, now)
+    rt.board.data.rubrics["analysis"] = RubricOverride(mode="auto", enabled=True)
+    rt.board.data.rubrics["tool"] = RubricOverride(mode="approve")
+    r = rt.rubrics()
+    assert r["analysis"].mode == "approve" and r["tool"].mode == "approve"

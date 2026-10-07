@@ -20,9 +20,11 @@ from .telegram import TelegramError
 
 log = logging.getLogger(__name__)
 
+NAV_TITLE = "📌 Vibe Stack — навигатор"  # так начинается текст навигатора (getChat отдаёт текст без разметки)
 RUBRIC_TAGS = "#инструмент #skill #приём #кейс #срочно #книга #бенчмарк #разбор #словарь #итоги"
-DISCLAIMER = ("Это три разных взгляда, а не истина: Arena отражает предпочтения людей, "
-              "индекс Artificial Analysis считается по собственным тестам.")
+DISCLAIMER_FULL = ("Это три разных взгляда, а не истина: Arena отражает предпочтения людей, "
+                   "индекс Artificial Analysis считается по собственным тестам.")
+DISCLAIMER_ARENA = "Это взгляд, а не истина: Arena отражает предпочтения людей в слепых сравнениях моделей."
 
 
 class Snapshot(BaseModel):
@@ -33,6 +35,7 @@ class Snapshot(BaseModel):
     date: str  # дата данных по источнику (YYYY-MM-DD), не дата нашего запроса
     top: list[str]
     data_url: str
+    attribution: str = ""  # подпись источника (HTML), обязательна по лицензии/условиям
 
 
 def load_snapshots(rt: Runtime) -> dict[str, Snapshot]:
@@ -61,19 +64,22 @@ def refresh_snapshots(rt: Runtime, adapters: list[Any]) -> tuple[dict[str, Snaps
 
 
 def render(rt: Runtime, snaps: dict[str, Snapshot], adapters: list[Any]) -> str:
-    lines = ["📌 <b>Vibe Stack — навигатор</b>"]
+    lines = [f"📌 <b>{NAV_TITLE.removeprefix('📌 ')}</b>"]
     shown = [snaps[a.key] for a in adapters if a.key in snaps]
     if shown:
         dates = sorted({s.date for s in shown})
-        when = dates[0] if len(dates) == 1 else f"{dates[0]} — {dates[-1]}"
-        lines += ["", f"🏆 <b>Топ моделей</b> (данные на {html.escape(when)})"]
+        head = f" (данные на {html.escape(dates[0])})" if len(dates) == 1 else ""  # иначе дата у каждой строки
+        lines += ["", f"🏆 <b>Топ моделей</b>{head}"]
         for s in shown:
             top = "  ".join(f"{i}. {html.escape(m)}" for i, m in enumerate(s.top[:3], 1))
-            suffix = f" (на {s.date})" if len(dates) > 1 else ""
+            suffix = f" (данные на {html.escape(s.date)})" if len(dates) > 1 else ""
             lines.append(f'<a href="{html.escape(s.data_url, quote=True)}">{html.escape(s.label)}</a>{suffix}: {top}')
-        lines.append(f"<i>{DISCLAIMER}</i>")
+        has_aa = any(s.key.startswith("aa") for s in shown)
+        lines.append(f"<i>{DISCLAIMER_FULL if has_aa else DISCLAIMER_ARENA}</i>")
+        for attribution in dict.fromkeys(s.attribution for s in shown if s.attribution):
+            lines.append(f"<i>{attribution}</i>")
     terms = [r["term"] for r in rt.state.glossary_entries()[:5]]
-    page = rt.state.get("glossary:page_url")
+    page = rt.cfg.glossary.telegraph_url or rt.state.get("glossary:page_url")
     if terms:
         tail = f' · <a href="{html.escape(page, quote=True)}">все термины</a>' if page else ""
         lines += ["", f"📖 <b>Словарь:</b> {html.escape(', '.join(terms))}{tail}"]
@@ -95,33 +101,60 @@ def run_pin(rt: Runtime, adapters: list[Any]) -> dict[str, Any]:
 
     snaps, problems = refresh_snapshots(rt, adapters)
     summary["problems"] = problems
+    if problems:
+        rt.notifier.notify("закреп: рейтинг не обновлён — " + "; ".join(problems)[:500])
     text = render(rt, snaps, adapters)
     digest = hashlib.sha256(text.encode()).hexdigest()
     mid = rt.state.get("pin:message_id")
-    if mid and rt.state.get("pin:digest") == digest:
+    pinned = _current_pin(rt)
+    if pinned == {}:
+        rt.state.put("pin:pinned", "")  # в канале ничего не закреплено: наш закреп открепили или удалили
+    if not mid and pinned and _is_navigator(pinned):
+        mid = str(pinned["message_id"])  # состояние потеряно, но навигатор уже висит — правим его, не дублируем
+        rt.state.put("pin:message_id", mid)
+        rt.state.put("pin:pinned", mid)
+    if mid and rt.state.get("pin:digest") == digest and _pinned_id(rt, mid) == mid:
         summary["status"] = "unchanged"  # топ и словарь не изменились — не трогаем сообщение
         return summary
+    text_posted = rt.state.get("pin:digest") == digest  # актуальный текст уже в канале
     try:
-        if mid:
+        if mid and not text_posted:
             try:
                 rt.tg.edit_message_text(rt.channel_id, int(mid), text)
+                text_posted = True
                 summary["status"] = "edited"
             except TelegramError as e:
-                err = str(e).lower()
-                if "not modified" in err:
+                if "not modified" in str(e).lower():
+                    text_posted = True
                     summary["status"] = "unchanged"
-                elif "not found" in err:
+                elif "not found" in str(e).lower():
                     mid = None  # закреп удалили вручную — создаём заново
                 else:
                     raise
+        if mid and _pinned_id(rt, mid) != mid:
+            try:
+                rt.tg.pin_chat_message(rt.channel_id, int(mid))
+                rt.state.put("pin:pinned", mid)
+                summary.setdefault("status", "pinned")
+            except TelegramError as e:
+                if "not found" not in str(e).lower():
+                    raise
+                mid = None  # сообщение удалено — создаём заново
         if not mid:
-            new_id = rt.tg.send_message(rt.channel_id, text, preview=False)
-            rt.tg.pin_chat_message(rt.channel_id, new_id)
-            rt.state.put("pin:message_id", str(new_id))
+            mid = str(rt.tg.send_message(rt.channel_id, text, preview=False))
+            # id сохраняем сразу: если закрепить не выйдет, следующий запуск только повторит закрепление,
+            # а не отправит второй навигатор
+            rt.state.put("pin:message_id", mid)
+            rt.state.put("pin:pinned", "")
+            text_posted = True
+            rt.tg.pin_chat_message(rt.channel_id, int(mid))
+            rt.state.put("pin:pinned", mid)
             summary["status"] = "created_and_pinned"
     except TelegramError as e:
         rt.notifier.notify(f"закреп не обновлён: {e}")
         summary["status"] = "telegram_error"
+        if text_posted:
+            rt.state.put("pin:digest", digest)  # текст уже в канале — следующий запуск только закрепит
         return summary
     rt.state.put("pin:digest", digest)
     old = load_snapshots(rt)
@@ -129,6 +162,28 @@ def run_pin(rt: Runtime, adapters: list[Any]) -> dict[str, Any]:
     _history(rt, snaps, old)
     rt.write_out("pin.html", text)
     return summary
+
+
+def _pinned_id(rt: Runtime, mid: str | None) -> str | None:
+    """Какое наше сообщение закреплено. Без записи (состояние до этого флага) — считаем, что закреплён mid."""
+    v = rt.state.get("pin:pinned")
+    return mid if v is None else v
+
+
+def _current_pin(rt: Runtime) -> dict[str, Any] | None:
+    """Закреплённое сейчас сообщение; None — узнать не удалось (тогда полагаемся на состояние)."""
+    get = getattr(rt.tg, "pinned_message", None)
+    if get is None:
+        return None
+    try:
+        return get(rt.channel_id)
+    except TelegramError as e:
+        log.warning("не узнать закреплённое сообщение: %s", e)
+        return None
+
+
+def _is_navigator(msg: dict[str, Any]) -> bool:
+    return str(msg.get("text", "")).startswith(NAV_TITLE)
 
 
 def _history(rt: Runtime, snaps: dict[str, Snapshot], old: dict[str, Snapshot]) -> None:

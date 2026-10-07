@@ -31,6 +31,14 @@ class FlakyTG(DryRunTelegram):
         return super().send_message(chat_id, text)
 
 
+@pytest.fixture(autouse=True)
+def three_slots(cfg) -> None:
+    """Сценарии написаны под расписание «3 поста: 10/14/18, окно 120 минут» — не зависят от config.yaml."""
+    cfg.schedule.publish_slots = ["10:00", "14:00", "18:00"]
+    cfg.schedule.slot_window_minutes = 120
+    cfg.limits.regular_per_day = 3
+
+
 def make_rt(cfg, tmp_path, now, tg=None, board=None) -> Runtime:
     state = State(tmp_path / "s.db")
     clock = lambda: now  # noqa: E731

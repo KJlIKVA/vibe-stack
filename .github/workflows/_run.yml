@@ -57,6 +57,8 @@ jobs:
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_ROOT_PAGE_ID: ${{ secrets.NOTION_ROOT_PAGE_ID }}
+          TELEGRAPH_TOKEN: ${{ secrets.TELEGRAPH_TOKEN }}
+          AA_API_KEY: ${{ secrets.AA_API_KEY }}
           # только чтение (permissions выше) — для лимитов GitHub API при сборе
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

@@ -49,7 +49,9 @@ def post_link(rt: Runtime, message_id: int | None) -> str | None:
 def compute_stats(rt: Runtime) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     end = rt.today()
     start = end - timedelta(days=6)
-    rows = [r for r in rt.state.candidates_between(start, end) if r["stage"] not in ("dedup", "deferred")]
+    # «Слово дня» — не находки из источников: попытки по терминам в «просмотрено/отклонено» не считаем
+    rows = [r for r in rt.state.candidates_between(start, end)
+            if r["stage"] not in ("dedup", "deferred") and r["contour"] != "glossary"]
     seen_ids = {r["id"] for r in rows}
     rejected = [r for r in rows if r["decision"] in ("rejected", "not_urgent")]
     by_reason: Counter[str] = Counter()

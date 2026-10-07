@@ -19,12 +19,26 @@ _STOP = {
 }
 
 
+# общий префикс рубрики — не тема: иначе «Слово дня: LLM» и «Слово дня: RAG» совпадают по Жаккару
+_RUBRIC_PREFIX = re.compile(r"^\s*слово дня:\s*")
+
+
 def topic_tokens(title: str, url: str = "") -> set[str]:
+    if m := _RUBRIC_PREFIX.match(title.lower()):
+        return {"term:" + title.lower()[m.end():].strip()}  # тема «Слова дня» — сам термин
     words = re.findall(r"[a-zа-яё0-9][a-zа-яё0-9+.#-]{2,}", title.lower())
     tokens = {w.strip(".-") for w in words if w not in _STOP}
     if repo := github_repo(url):
         tokens.add(f"repo:{repo}")
     return {t for t in tokens if t}
+
+
+def domain_key(url: str, domain: str = "") -> str:
+    """«Домен» для правила «не больше N постов с домена в день». У репозиториев GitHub — владелец:
+    разные проекты на github.com — разные источники, а не один сайт."""
+    if repo := github_repo(url):
+        return f"github.com/{repo.split('/')[0]}"
+    return domain or host_of(url)
 
 
 def same_topic(a: set[str], b: set[str], threshold: float) -> bool:
@@ -66,7 +80,7 @@ def pick_next(
     weekly_max = cfg.weekly_max if weekly_max is None else weekly_max
     regular = [h for h in history if h.counts_regular and not h.urgent]
     last_rubric = max(regular, key=lambda h: h.published_at).rubric if regular else None
-    domains_today = [h.domain for h in history if h.local_date == today]
+    domains_today = [domain_key(h.source_url, h.domain) for h in history if h.local_date == today]
     wk = week_start(today)
     week_counts: dict[str, int] = {}
     for h in history:
@@ -86,7 +100,7 @@ def pick_next(
             reasons.append("рубрика выключена")
         if last_rubric and p.rubric == last_rubric:
             reasons.append("та же рубрика подряд")
-        domain = p.source_domain or host_of(p.source_url)
+        domain = domain_key(p.source_url, p.source_domain)
         if domains_today.count(domain) >= cfg.max_per_domain_per_day:
             reasons.append(f"домен {domain} уже был сегодня")
         if (mx := weekly_max.get(p.rubric)) is not None and week_counts.get(p.rubric, 0) >= mx:

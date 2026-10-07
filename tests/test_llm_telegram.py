@@ -234,3 +234,35 @@ def test_dry_run_spend_goes_to_real_ledger(cfg, tmp_path, now, monkeypatch) -> N
     assert real.db.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0] == 1
     copy = State(tmp_path / "copy.db")
     assert copy.db.execute("SELECT COUNT(*) FROM llm_calls").fetchone()[0] == 0
+
+
+def test_daily_token_limit_blocks_call_that_could_exceed(cfg, tmp_path, now) -> None:
+    from datetime import timedelta
+
+    cfg.llm.daily_budget_usd = None
+    cfg.llm.steps["write"].max_output_tokens = 1000
+    cfg.llm.daily_token_limits = {"gpt-5.6-terra": 4000}
+    llm = fake(cfg, tmp_path, now, {("write", "a"): "text"})
+    llm.output_tokens = 1500  # каждый вызов пишет в журнал 100 (вход) + 1500 (выход)
+    llm.text("write", "p" * 400, "a")
+    llm.text("write", "p" * 400, "a")  # 1600 + резерв 200 + 1000 = 2800 ≤ 4000
+    with pytest.raises(BudgetExceeded, match="лимит токенов"):
+        llm.text("write", "p" * 400, "a")  # 3200 + 1200 > 4000 — вызов мог бы выйти за лимит
+    assert llm.state.llm_tokens_since("gpt-5.6-terra", now - timedelta(hours=1)) == 3200
+
+
+def test_daily_token_limit_resets_at_utc_midnight(cfg, tmp_path, now) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    cfg.llm.daily_token_limits = {"gpt-5.6-terra": 3000}
+    cfg.llm.steps["write"].max_output_tokens = 1000
+    state = State(tmp_path / "s.db")
+    t = datetime(2026, 10, 7, 23, 50, tzinfo=UTC)
+    clock = {"now": t}
+    llm = FakeLLM(cfg.llm, state, "r", lambda: clock["now"], "Europe/Moscow", {("write", "a"): "text"})
+    llm.output_tokens = 2500
+    llm.text("write", "p", "a")
+    with pytest.raises(BudgetExceeded):
+        llm.text("write", "p", "a")
+    clock["now"] = t + timedelta(minutes=15)  # 00:05 UTC — новые сутки OpenAI
+    llm.text("write", "p", "a")

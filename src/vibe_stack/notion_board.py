@@ -380,6 +380,18 @@ class NotionBoard:
         self._write("добавить термин в словарь", lambda: self.client.pages.create(
             parent={"type": "data_source_id", "data_source_id": ds}, properties=props), idempotent=False)
 
+    def glossary_entries(self) -> list[GlossaryEntry]:
+        out = []
+        for row in self._query(DB_GLOSSARY):
+            p = row["properties"]
+            term, url = _plain(p.get("Термин")).strip(), (p.get("Источник") or {}).get("url")
+            published = _date(p.get("Дата публикации"))
+            if term and url and published:
+                out.append(GlossaryEntry(term=term, definition=_plain(p.get("Определение")), source_url=url,
+                                         published_at=published,
+                                         post_url=(p.get("Ссылка на пост") or {}).get("url")))
+        return out
+
     def add_leaderboard_row(self, snap: Any) -> None:
         ds = self._ds_id(DB_LEADERBOARD)
         props = {

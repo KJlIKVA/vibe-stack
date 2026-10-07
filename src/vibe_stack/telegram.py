@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import html
 import logging
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -98,6 +100,10 @@ class Telegram:
         self._call("pinChatMessage", {"chat_id": chat_id, "message_id": message_id, "disable_notification": True},
                    idempotent=True)
 
+    def pinned_message(self, chat_id: str) -> dict[str, Any]:
+        """Последнее закреплённое сообщение канала ({} — ничего не закреплено)."""
+        return self._call("getChat", {"chat_id": chat_id}, idempotent=True).get("pinned_message") or {}
+
 
 class DryRunTelegram:
     """Вместо отправки пишет посты в out/. message_id — отрицательные, чтобы их нельзя было спутать."""
@@ -108,6 +114,7 @@ class DryRunTelegram:
         self.sent: list[tuple[str, str]] = []
         self.edited: list[tuple[int, str]] = []
         self.pinned: list[int] = []
+        self.texts: dict[int, str] = {}
         self._next = -1
 
     def send_message(self, chat_id: str, text: str, *, html: bool = True, preview: bool = True,
@@ -115,16 +122,26 @@ class DryRunTelegram:
         mid = self._next
         self._next -= 1
         self.sent.append((chat_id, text))
+        self.texts[mid] = text
         (self.out / f"msg{-mid:03d}.html").write_text(text, encoding="utf-8")
         return mid
 
     def edit_message_text(self, chat_id: str, message_id: int, text: str) -> None:
         self.edited.append((message_id, text))
+        self.texts[message_id] = text
         (self.out / f"edit{abs(message_id):03d}.html").write_text(text, encoding="utf-8")
 
     def pin_chat_message(self, chat_id: str, message_id: int) -> None:
         self.pinned.append(message_id)
         log.info("[dry-run] pin %s", message_id)
+
+    def pinned_message(self, chat_id: str) -> dict[str, Any]:
+        if not self.pinned:
+            return {}
+        mid = self.pinned[-1]
+        # как Bot API: текст без разметки (она приходит отдельно, в entities)
+        plain = html.unescape(re.sub(r"<[^>]+>", "", self.texts.get(mid, "")))
+        return {"message_id": mid, "text": plain}
 
 
 class Notifier:

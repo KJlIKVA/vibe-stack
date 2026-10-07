@@ -40,11 +40,21 @@ def test_same_rubric_not_twice_in_a_row(cfg, now) -> None:
     assert pick(q, hist, cfg, now).post.title == "Nice trick"
 
 
-def test_one_post_per_domain_per_day(cfg, now) -> None:
-    hist = [published("Old", "trick", "https://github.com/a/b", now - timedelta(hours=2))]
-    q = [post("Repo X", "tool", "https://github.com/x/y", now=now)]
+def test_posts_per_domain_per_day(cfg, now) -> None:
+    cfg.planner.max_per_domain_per_day = 2
+    hist = [published(f"Old {i}", "trick", f"https://openai.com/index/{i}", now - timedelta(hours=2 + i))
+            for i in range(2)]
+    q = [post("News X", "tool", "https://openai.com/index/x", now=now)]
     p = pick(q, hist, cfg, now)
-    assert p.post is None and "домен github.com" in p.reason
+    assert p.post is None and "домен openai.com" in p.reason
+
+
+def test_github_domain_is_repo_owner(cfg, now) -> None:
+    cfg.planner.max_per_domain_per_day = 1
+    hist = [published("Old", "trick", "https://github.com/a/b", now - timedelta(hours=2))]
+    same_owner = pick([post("Repo Y", "tool", "https://github.com/a/y", now=now)], hist, cfg, now)
+    assert same_owner.post is None and "домен github.com/a" in same_owner.reason
+    assert pick([post("Repo X", "tool", "https://github.com/x/y", now=now)], hist, cfg, now).post is not None
 
 
 def test_topic_not_repeated_within_7_days(cfg, now) -> None:
@@ -89,3 +99,12 @@ def test_active_slot() -> None:
     assert active_slot(datetime(2026, 10, 7, 12, 30, tzinfo=MSK), slots, 120) is None
     assert active_slot(datetime(2026, 10, 7, 9, 59, tzinfo=MSK), slots, 120) is None
     assert active_slot(datetime(2026, 10, 7, 18, 1, tzinfo=MSK), slots, 120) == "18:00"
+
+
+def test_glossary_terms_are_different_topics(cfg, now) -> None:
+    hist = [published("Слово дня: LLM", "glossary", "https://a.dev/llm", now - timedelta(days=3)),
+            published("Some tool", "tool", "https://t.dev/x", now - timedelta(hours=3))]
+    other = [post("Слово дня: RAG", "glossary", "https://b.dev/rag", now=now)]
+    same = [post("Слово дня: LLM", "glossary", "https://c.dev/llm", now=now)]
+    assert pick(other, hist, cfg, now).post is not None
+    assert pick(same, hist, cfg, now).post is None

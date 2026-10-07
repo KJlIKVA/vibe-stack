@@ -57,3 +57,14 @@ def test_data_cannot_close_our_tags() -> None:
 def test_weekly_prompt_contains_stats() -> None:
     out = prompts.weekly_prompt({"просмотрено": 42}, [], [])
     assert '"просмотрено": 42' in out and "{{" not in out
+
+
+def test_clarity_rules_in_every_writing_prompt() -> None:
+    meta = {"category": "tool", "url": "u", "title": "t", "mode": "standard"}
+    for overlay in prompts.OVERLAY_FILES:
+        extra = {"термин": "MCP"} if overlay == "glossary" else None
+        out = prompts.write_prompt(["c1", "c2"], meta, overlay, "🛠", "#инструмент", extra=extra)
+        assert "<понятность>" in out and "супер понятно" in out
+        assert out.index("<понятность>") < out.index("Формат")  # правила понятности — до формата рубрики
+    assert "<понятность>" in prompts.weekly_prompt({}, [], [])
+    assert "<понятность>" not in prompts.score_prompt({"id": "1"}, "doc")  # оценку и проверку не трогаем

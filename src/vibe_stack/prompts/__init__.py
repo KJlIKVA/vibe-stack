@@ -39,6 +39,11 @@ def safety_preamble() -> str:
     return "<безопасность>\n" + load("safety").rstrip("\n") + "\n</безопасность>\n\n"
 
 
+def clarity_block() -> str:
+    """Правила понятности текста (решение владельца канала): вставляются в C и D, текст ТЗ не меняется."""
+    return "<понятность>\n" + load("clarity").rstrip("\n") + "\n</понятность>\n\n"
+
+
 def neutralize(data: str) -> str:
     """Данные из интернета не могут закрыть наш тег и выйти из «песочницы» <source_document> и т. п."""
     return _DATA_TAG_RE.sub(lambda m: f"‹{m.group(1)}{m.group(2)}›", data)
@@ -97,11 +102,11 @@ def write_prompt(approved_claims: list[str], meta: dict[str, Any], overlay: str,
     if "{{эмодзи рубрики}}" in ov:
         values["эмодзи рубрики"] = emoji
     ov = ov.replace("#рубрика", hashtag)
-    return safety_preamble() + base.rstrip("\n") + "\n\n" + render(ov, values)
+    return safety_preamble() + base.rstrip("\n") + "\n\n" + clarity_block() + render(ov, values)
 
 
 def weekly_prompt(stats: dict[str, Any], published: list[dict[str, Any]], rejected: list[dict[str, Any]]) -> str:
-    return safety_preamble() + render(load("weekly_D"), {
+    return safety_preamble() + clarity_block() + render(load("weekly_D"), {
         "JSON: просмотрено, отклонено по причинам, опубликовано, срочных, рассчитано кодом":
             json.dumps(stats, ensure_ascii=False),
         "опубликованное за неделю: заголовок, ссылка на пост": json.dumps(published, ensure_ascii=False),

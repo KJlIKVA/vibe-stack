@@ -11,6 +11,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from datetime import UTC
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -131,13 +132,26 @@ class LLM:
         fresh = max(u.input_tokens - u.cached_tokens, 0)
         return (fresh * price.input + u.cached_tokens * cached_price + u.output_tokens * price.output) / 1_000_000
 
-    def check_budget(self) -> None:
+    def check_budget(self, model: str | None = None, reserve_tokens: int = 0) -> None:
+        """reserve_tokens — сколько токенов может занять предстоящий вызов (оценка входа + максимум выхода)."""
         calls = self.state.llm_calls_in_run(self.run_id)
         if calls >= self.cfg.max_calls_per_run:
             raise BudgetExceeded(f"достигнут MAX_LLM_CALLS_PER_RUN={self.cfg.max_calls_per_run}")
-        spent = self.state.llm_cost_on(local_date(self.clock(), self.tz))
-        if spent >= self.cfg.daily_budget_usd:
-            raise BudgetExceeded(f"дневной бюджет ${self.cfg.daily_budget_usd:.2f} исчерпан (${spent:.2f})")
+        if self.cfg.daily_budget_usd is not None:
+            spent = self.state.llm_cost_on(local_date(self.clock(), self.tz))
+            if spent >= self.cfg.daily_budget_usd:
+                raise BudgetExceeded(f"дневной бюджет ${self.cfg.daily_budget_usd:.2f} исчерпан (${spent:.2f})")
+        limit = self.cfg.daily_token_limits.get(model or "")
+        if limit is not None:
+            day_start = self.clock().astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+            used = self.state.llm_tokens_since(model or "", day_start)
+            if used + reserve_tokens > limit:
+                raise BudgetExceeded(f"дневной лимит токенов {model}: {limit:,} — использовано {used:,}, "
+                                     f"вызов может занять ещё до {reserve_tokens:,}")
+
+    def reserve_tokens(self, step: str, prompt: str) -> int:
+        """Верхняя оценка токенов вызова: вход ≈ байты UTF-8 / 2 (с запасом) + максимум выхода шага."""
+        return len(prompt.encode("utf-8")) // 2 + self.cfg.steps[step].max_output_tokens
 
     def _invoke(self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str) -> str:
         step_cfg = self.cfg.steps.get(step)
@@ -146,7 +160,8 @@ class LLM:
         if step_cfg.model not in self.cfg.prices_per_1m:
             raise LLMError(f"для модели {step_cfg.model} нет цены в llm.prices_per_1m — бюджет не посчитать")
         for attempt in range(self.cfg.max_attempts):
-            self.check_budget()  # каждая попытка — отдельный вызов в лимите и бюджете
+            # каждая попытка — отдельный вызов в лимите и бюджете
+            self.check_budget(step_cfg.model, self.reserve_tokens(step, prompt))
             now = self.clock()
             day = local_date(now, self.tz)
             try:
@@ -264,25 +279,28 @@ class FakeLLM(LLM):
         super().__init__(cfg, state, run_id, clock, tz, ledger)
         self.responses = responses
         self.cost_per_call = cost_per_call
+        self.output_tokens = 0  # сколько «выхода» записывать в журнал за вызов (для тестов лимита токенов)
         self.calls: list[tuple[str, str, str]] = []
 
     def cost(self, model: str, u: Usage) -> float:
         return self.cost_per_call
 
     def _invoke(self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str) -> str:
-        self.check_budget()
+        step_cfg = self.cfg.steps.get(step)
+        model = step_cfg.model if step_cfg else "fake"
+        self.check_budget(model, self.reserve_tokens(step, prompt) if step_cfg else 0)
         now = self.clock()
         self.calls.append((step, ctx_id, prompt))
         key = (step, ctx_id)
         if key not in self.responses:
-            self.state.record_llm_call(run_id=self.run_id, step=step, model="fake", now=now,
+            self.state.record_llm_call(run_id=self.run_id, step=step, model=model, now=now,
                                        day=local_date(now, self.tz), input_tokens=0, cached_tokens=0,
                                        output_tokens=0, cost_usd=0.0, ok=False)
             raise LLMError(f"нет фейкового ответа для {key}")
         payload = self.responses[key]
         if callable(payload):
             payload = payload(prompt)
-        self.state.record_llm_call(run_id=self.run_id, step=step, model="fake", now=now,
+        self.state.record_llm_call(run_id=self.run_id, step=step, model=model, now=now,
                                    day=local_date(now, self.tz), input_tokens=len(prompt) // 4, cached_tokens=0,
-                                   output_tokens=0, cost_usd=self.cost_per_call, ok=True)
+                                   output_tokens=self.output_tokens, cost_usd=self.cost_per_call, ok=True)
         return payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)

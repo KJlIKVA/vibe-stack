@@ -13,7 +13,11 @@ llm:
   provider: openai
   base_url: null              # null = https://api.openai.com/v1
   max_calls_per_run: 60       # MAX_LLM_CALLS_PER_RUN
-  daily_budget_usd: 3.0       # дневной бюджет на все контуры вместе
+  daily_budget_usd: null      # лимит в долларах выключен: расход ограничивает лимит токенов ниже
+  # Жёсткий дневной лимит токенов на модель (вход + выход с рассуждением), сутки по UTC — как у OpenAI.
+  # Вызов, который может выйти за лимит (оценка входа + max_output_tokens шага), не делается.
+  daily_token_limits:
+    gpt-5.6-terra: 2000000
   request_timeout_s: 180
   max_attempts: 2             # попыток на вызов (таймаут, 5xx, 429); каждая — в лимите и бюджете
   # Цены за 1M токенов (USD), контекст до 272K — для подсчёта бюджета (сверено 2026-10-07).
@@ -34,7 +38,7 @@ llm:
     glossary: {model: gpt-5.6-terra, effort: low,   max_output_tokens: 6000}    # промпт G (слово дня)
 
 limits:
-  regular_per_day: 3
+  regular_per_day: 24         # потолок, а не план: выходит столько, сколько прошло отбор
   urgent_per_day: 2
 
 gate:
@@ -44,14 +48,18 @@ gate:
   min_approved_claims: 2
 
 schedule:
-  publish_slots: ["10:00", "14:00", "18:00"]   # в channel.tz
-  slot_window_minutes: 120    # слот считается активным столько минут после своего времени
+  # в channel.tz: каждые 30 минут с 08:00 до 23:30, ночью канал молчит; в слот — не больше одного поста
+  publish_slots: ["08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+                  "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
+                  "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
+                  "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"]
+  slot_window_minutes: 30     # слот активен до следующего; тик (tick.yml) приходит на :07 и :37
   queue_max_age_days: 5       # одобренный, но не вышедший пост старше этого устаревает
 
 planner:
   topic_repeat_days: 7
   topic_similarity: 0.5       # порог сходства заголовков (Jaccard по словам)
-  max_per_domain_per_day: 1
+  max_per_domain_per_day: 3   # у репозиториев GitHub «домен» — владелец (github.com/owner)
   weekly_min: {glossary: 1, analysis: 1}
   weekly_max: {book_video: 2}
 
@@ -96,10 +104,12 @@ rubrics:
 # Порядок: сначала термины, встретившиеся в постах за неделю и ещё не попавшие в словарь, потом — стартовый список.
 glossary:
   telegraph_page: true          # публичная страница словаря (Telegraph); false — только таблица Glossary в Notion
+  telegraph_path: "Slovar-Vibe-Stack-10-07"
+  telegraph_url: "https://telegra.ph/Slovar-Vibe-Stack-10-07"
   terms:
     - {term: "LLM", aliases: ["большая языковая модель", "large language model"], source: "https://en.wikipedia.org/wiki/Large_language_model"}
     - {term: "Контекстное окно", aliases: ["context window", "контекст"], source: "https://en.wikipedia.org/wiki/Context_window"}
-    - {term: "Токен", aliases: ["token", "токены", "tokens"], source: "https://help.openai.com/en/articles/4936856-what-are-tokens-and-how-to-count-them"}
+    - {term: "Токен", aliases: ["token", "токены", "tokens"], source: "https://learn.microsoft.com/en-us/dotnet/ai/conceptual/understanding-tokens"}
     - {term: "MCP", aliases: ["Model Context Protocol"], source: "https://modelcontextprotocol.io/docs/getting-started/intro"}
     - {term: "Skill", aliases: ["skills", "agent skills", "скилл"], source: "https://agentskills.io/home"}
     - {term: "Агент", aliases: ["agent", "агенты", "AI-агент", "coding-агент"], source: "https://www.anthropic.com/engineering/building-effective-agents"}
@@ -112,6 +122,14 @@ glossary:
     - {term: "Субагент", aliases: ["subagent", "субагенты", "sub-agent"], source: "https://code.claude.com/docs/en/sub-agents"}
     - {term: "Хуки", aliases: ["hooks", "hook"], source: "https://code.claude.com/docs/en/hooks"}
     - {term: "AGENTS.md", aliases: [], source: "https://agents.md/"}
+
+# Рейтинги в закрепе (раздел 5). Только разрешённые способы доступа — см. docs/decisions.md.
+leaderboards:
+  - {key: arena_text, type: arena_hf, label: "Arena · текст", dataset_config: text_style_control}
+  - {key: arena_webdev, type: arena_hf, label: "Arena · webdev", dataset_config: webdev}
+  # Условия API Artificial Analysis не разрешают ежедневный топ без письменного согласия.
+  # Включить (enabled: true + секрет AA_API_KEY) только после разрешения: artificialanalysis.ai/data-api#contact
+  - {key: aa_index, type: artificial_analysis, label: "Artificial Analysis", enabled: false}
 
 # Источники. contours: в каких контурах опрашивать. official_domains — для белого списка срочных:
 # срочным может быть только материал с этих доменов и только из источника с whitelist: true.

@@ -56,6 +56,7 @@ def _parser() -> argparse.ArgumentParser:
     ev.add_argument("--phase", type=int, default=2)
     ev.add_argument("--only", help="id фикстуры")
     sub.add_parser("notion-setup", help="создать базы Notion под NOTION_ROOT_PAGE_ID")
+    sub.add_parser("telegraph-setup", help="один раз создать страницу словаря на Telegraph (токен — в .env)")
     sub.add_parser("status", help="счётчики за сегодня и расходы")
     return p
 
@@ -71,6 +72,8 @@ def main(argv: list[str] | None = None) -> None:
             code = run_eval(args, cfg)
         elif args.command == "notion-setup":
             code = notion_setup(cfg)
+        elif args.command == "telegraph-setup":
+            code = telegraph_setup(cfg)
         else:
             code = status(args, cfg)
     except MissingSecret as e:
@@ -134,6 +137,18 @@ def build_runtime(args: argparse.Namespace, cfg: Config, contour: str) -> Runtim
         notifier = Notifier(None, None, out_dir / "admin.log")
 
     http = httpx.Client(timeout=cfg.fetch.timeout_s, headers={"User-Agent": cfg.fetch.user_agent})
+    glossary_page = None
+    if cfg.glossary.telegraph_page and cfg.glossary.telegraph_path:
+        from .glossary_page import DryRunPage, TelegraphPage
+
+        token = env("TELEGRAPH_TOKEN")
+        if not publish:
+            glossary_page = DryRunPage(out_dir / "glossary_page.json")
+        elif token:
+            author = f"https://t.me/{cfg.channel.username}" if cfg.channel.username else ""
+            glossary_page = TelegraphPage(token, cfg.glossary.telegraph_path, author)
+        else:
+            log.warning("TELEGRAPH_TOKEN не задан — страница словаря не обновляется")
     if publish or env("OPENAI_API_KEY"):
         llm: LLM = OpenAILLM(cfg.llm, state, run_id, clock, cfg.channel.tz, ledger=ledger)
     else:
@@ -142,7 +157,7 @@ def build_runtime(args: argparse.Namespace, cfg: Config, contour: str) -> Runtim
     rt = Runtime(
         cfg=cfg, state=state, board=board, tg=tg, notifier=notifier, llm=llm,
         fetcher=HttpFetcher(cfg.fetch, clock), clock=clock, run_id=run_id, out_dir=out_dir, mode=mode,
-        channel_id=channel, force=bool(args.force),
+        channel_id=channel, force=bool(args.force), glossary_page=glossary_page,
         sources_factory=lambda chosen: [build_source(s, http, clock, cfg.gate.max_age_days) for s in chosen],
     )
     state.start_run(run_id, contour, mode, clock())
@@ -228,6 +243,24 @@ def notion_setup(cfg: Config) -> int:
     created = board.setup()
     print("созданы базы: " + (", ".join(created) if created else "ничего, всё уже есть"))
     print("В «Настройках» стоит флажок «Пауза» — снимите его, когда будете готовы к публикациям.")
+    return 0
+
+
+def telegraph_setup(cfg: Config) -> int:
+    from .glossary_page import setup
+
+    setup_logging(None)
+    if env("TELEGRAPH_TOKEN"):
+        print("TELEGRAPH_TOKEN уже задан — страница существует. Повторно не создаю.")
+        return 1
+    author_url = f"https://t.me/{cfg.channel.username}" if cfg.channel.username else ""
+    token, path, url = setup(author_url)
+    env_file = Path(".env")
+    lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.exists() else []
+    lines = [ln for ln in lines if not ln.startswith("TELEGRAPH_TOKEN=")] + [f"TELEGRAPH_TOKEN={token}"]
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("токен записан в .env (TELEGRAPH_TOKEN) — его же нужно положить в GitHub Secrets")
+    print(f"path: {path}\nurl:  {url}\nВпишите их в config.yaml → glossary.telegraph_path / telegraph_url")
     return 0
 
 

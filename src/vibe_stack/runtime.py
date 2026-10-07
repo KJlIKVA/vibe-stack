@@ -20,6 +20,7 @@ from .telegram import DryRunTelegram, Notifier, Telegram
 from .timeutil import Clock, local, local_date
 
 log = logging.getLogger(__name__)
+APPROVE_ONLY = ("analysis",)  # рубрики, которые нельзя перевести в авто ни конфигом, ни из Notion
 
 SourcesFactory = Callable[[list[SourceConfig]], list[Any]]
 
@@ -77,6 +78,10 @@ class Runtime:
             if key in out:
                 upd = {k: v for k, v in (("mode", ov.mode), ("enabled", ov.enabled)) if v is not None}
                 out[key] = out[key].model_copy(update=upd)
+        for key in APPROVE_ONLY:  # раздел 6: «Разбор» выходит только после вашего одобрения, Notion это не меняет
+            if key in out and out[key].mode != "approve":
+                log.warning("рубрика %s: режим %s не допускается — только approve", key, out[key].mode)
+                out[key] = out[key].model_copy(update={"mode": "approve"})
         return out
 
     def sources(self, contour: str) -> list[Any]:

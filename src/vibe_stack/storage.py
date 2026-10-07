@@ -261,6 +261,12 @@ class State:
         q = "SELECT COALESCE(SUM(cost_usd), 0) FROM llm_calls WHERE local_date=?"
         return float(self.db.execute(q, (day.isoformat(),)).fetchone()[0])
 
+    def llm_tokens_since(self, model: str, since: datetime) -> int:
+        """Токены модели (вход + выход) с момента since; ts в журнале — UTC ISO, сравнение строк корректно."""
+        q = ("SELECT COALESCE(SUM(input_tokens + output_tokens), 0) FROM llm_calls "
+             "WHERE model=? AND ts >= ?")
+        return int(self.db.execute(q, (model, iso(since))).fetchone()[0])
+
     def llm_calls_in_run(self, run_id: str) -> int:
         return self.db.execute("SELECT COUNT(*) FROM llm_calls WHERE run_id=?", (run_id,)).fetchone()[0]
 

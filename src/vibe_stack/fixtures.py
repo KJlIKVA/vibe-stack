@@ -179,7 +179,10 @@ def run_scenario(fx: Fixture, cfg: Config, now: datetime, llm_factory: LLMFactor
                 state.put("pin:message_id", str(pre["message_id"]))
                 import hashlib
 
-                state.put("pin:digest", hashlib.sha256(render(rt, snaps, adapters).encode()).hexdigest())
+                text = render(rt, snaps, adapters)
+                state.put("pin:digest", hashlib.sha256(text.encode()).hexdigest())
+                tg.pinned.append(int(pre["message_id"]))  # навигатор уже закреплён в канале
+                tg.texts[int(pre["message_id"])] = text
             actual["summary"] = run_pin(rt, adapters)
             actual["edited"] = len(tg.edited)
         case "publish":

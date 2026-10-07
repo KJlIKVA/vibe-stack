@@ -90,12 +90,13 @@ def test_setup_creates_all_databases_and_is_idempotent(board) -> None:
             "Verify"} <= set(posts_props)
 
 
-def test_settings_start_paused(board) -> None:
+def test_settings_start_paused(board, cfg) -> None:
     b, _ = board
     b.setup()
     s = b.settings()
     assert s.pause is True  # безопасный старт: канал на паузе, пока вы её не снимете
-    assert s.publish_slots == ["10:00", "14:00", "18:00"] and s.tz == "Europe/Moscow"
+    assert s.publish_slots == cfg.schedule.publish_slots and s.tz == "Europe/Moscow"
+    assert s.regular_per_day == cfg.limits.regular_per_day
 
 
 def test_rubric_and_source_overrides(board) -> None:

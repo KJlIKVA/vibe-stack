@@ -72,6 +72,7 @@ class Board(Protocol):
     def posts_with_status(self, status: Status) -> list[PostRecord]: ...
     def published_since(self, since: datetime) -> list[PostRecord]: ...
     def add_glossary(self, entry: GlossaryEntry) -> None: ...
+    def glossary_entries(self) -> list[GlossaryEntry]: ...
 
 
 class GlossaryEntry(BaseModel):
@@ -143,6 +144,9 @@ class LocalBoard:
         self.data.glossary.append(entry)
         self._save()
 
+    def glossary_entries(self) -> list[GlossaryEntry]:
+        return list(self.data.glossary)
+
     def get(self, ref: str) -> PostRecord:
         return next(p for p in self.data.posts if p.ref == ref)
 
@@ -184,6 +188,9 @@ class RecordingBoard:
 
     def add_glossary(self, entry: GlossaryEntry) -> None:
         self._log("add_glossary", entry.model_dump())
+
+    def glossary_entries(self) -> list[GlossaryEntry]:
+        return self.inner.glossary_entries()
 
 
 def _json_default(o: Any) -> Any:
