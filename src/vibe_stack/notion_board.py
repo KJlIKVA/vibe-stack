@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, TypeVar
+from zoneinfo import ZoneInfo
 
 from .board import (
     BoardSettings,
@@ -90,6 +91,7 @@ def posts_schema(cfg: Config) -> dict[str, Any]:
         "Post HTML": {"rich_text": {}},
         "Verify": {"rich_text": {}},
         "Candidate ID": {"rich_text": {}},
+        "Время публикации": {"date": {}},
     }
 
 
@@ -309,6 +311,7 @@ class NotionBoard:
             html=_plain(p.get("Post HTML")),
             verify=_safe_json(verify_raw),
             candidate_id=_plain(p.get("Candidate ID")) or None,
+            planned_at=_date(p.get("Время публикации")),
         )
 
     # --- запись ---------------------------------------------------------------------------
@@ -350,6 +353,10 @@ class NotionBoard:
                     out["Verify"] = {"rich_text": _text(json.dumps(v, ensure_ascii=False) if v else "")}
                 case "candidate_id":
                     out["Candidate ID"] = {"rich_text": _text(v or "")}
+                case "planned_at":
+                    # местное время с поясом канала — в Notion видно «10:00», а не UTC
+                    out["Время публикации"] = {"date": {"start": v.astimezone(ZoneInfo(self.cfg.channel.tz))
+                                                        .isoformat(timespec="minutes")} if v else None}
                 case "ref":
                     pass
                 case _:
@@ -405,6 +412,14 @@ class NotionBoard:
             parent={"type": "data_source_id", "data_source_id": ds}, properties=props), idempotent=False)
 
     # --- первичная настройка ---------------------------------------------------------------------------
+    def _add_missing_properties(self, ds_id: str, schema: dict[str, Any]) -> None:
+        """Новые столбцы в уже созданных базах (например, «Время публикации»). Существующие не трогаем."""
+        current = self._retry(lambda: self.client.data_sources.retrieve(data_source_id=ds_id)).get("properties", {})
+        missing = {k: v for k, v in schema.items() if k not in current and "title" not in v}
+        if missing:
+            self._retry(lambda: self.client.data_sources.update(data_source_id=ds_id, properties=missing))
+            log.info("Notion: добавлены столбцы %s", ", ".join(missing))
+
     def setup(self) -> list[str]:
         """Создаёт недостающие базы под корневой страницей и заполняет справочники. Повторный запуск безопасен."""
         self._ds = None
@@ -412,6 +427,7 @@ class NotionBoard:
         created = []
         for name, schema_fn in SCHEMAS.items():
             if name in existing:
+                self._add_missing_properties(existing[name], schema_fn(self.cfg))
                 continue
             db = self._retry(lambda n=name, f=schema_fn: self.client.databases.create(
                 parent={"type": "page_id", "page_id": self.root},

@@ -30,6 +30,7 @@ def make_rt(cfg, tmp_path, now, registry=None) -> Runtime:
     clock = lambda: now  # noqa: E731
     cfg.schedule.publish_slots = ["10:00", "14:00", "18:00"]
     cfg.schedule.slot_window_minutes = 120
+    cfg.sandbox.enabled = True  # в config.yaml песочница может быть выключена — здесь проверяем её саму
     return Runtime(cfg=cfg, state=state, board=LocalBoard(tmp_path / "b.json"), tg=DryRunTelegram(tmp_path / "tg"),
                    notifier=Notifier(None, None, tmp_path / "a.log"),
                    llm=FakeLLM(cfg.llm, state, "p", clock, "Europe/Moscow", {}), fetcher=FixtureFetcher({}, clock),

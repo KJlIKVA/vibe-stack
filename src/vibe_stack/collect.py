@@ -7,7 +7,7 @@ import time
 from datetime import timedelta
 from typing import Any
 
-from . import prompts, sandbox
+from . import dayplan, prompts, sandbox
 from .board import BoardUnavailable
 from .config import Rubric
 from .glossary import run_glossary
@@ -102,6 +102,8 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
         log.info("публикаций из сбора ноль: %s", summary["reason"])
     if not board_failed and not summary["stopped"]:
         board_failed = _glossary_step(rt, summary)
+    if not board_failed:
+        summary["plan"] = dayplan.plan_and_report(rt)  # время каждому посту на сегодня + «План на сегодня» админу
     if not board_failed:  # при сбое Notion второй cron-запуск дня попробует ещё раз
         rt.mark_done(done_key)
     return summary

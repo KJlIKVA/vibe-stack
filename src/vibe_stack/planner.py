@@ -74,6 +74,7 @@ def pick_next(
     rubric_enabled: dict[str, bool],
     weekly_min: dict[str, int] | None = None,
     weekly_max: dict[str, int] | None = None,
+    soft_rubric_repeat: bool = False,
 ) -> Pick:
     """history — опубликованное (обычное и срочное) минимум за topic_repeat_days дней."""
     weekly_min = cfg.weekly_min if weekly_min is None else weekly_min
@@ -98,7 +99,7 @@ def pick_next(
         reasons = []
         if not rubric_enabled.get(p.rubric, False):
             reasons.append("рубрика выключена")
-        if last_rubric and p.rubric == last_rubric:
+        if last_rubric and p.rubric == last_rubric and not soft_rubric_repeat:
             reasons.append("та же рубрика подряд")
         domain = domain_key(p.source_url, p.source_domain)
         if domains_today.count(domain) >= cfg.max_per_domain_per_day:
@@ -116,10 +117,12 @@ def pick_next(
     if not ok:
         return Pick(None, skipped)
 
-    def priority(p: PostRecord) -> tuple[int, int, float]:
+    def priority(p: PostRecord) -> tuple[int, int, int, float]:
         need = weekly_min.get(p.rubric, 0) - week_counts.get(p.rubric, 0)
         found = p.found_at.timestamp() if p.found_at else 0.0
-        # 1) рубрики с невыполненной недельной квотой, 2) баллы, 3) кто дольше ждёт
-        return (0 if need > 0 else 1, -(p.score or 0), found)
+        repeat = 1 if last_rubric and p.rubric == last_rubric else 0
+        # 1) рубрики с невыполненной недельной квотой, 2) другая рубрика, чем у предыдущего поста,
+        # 3) баллы, 4) кто дольше ждёт
+        return (0 if need > 0 else 1, repeat, -(p.score or 0), found)
 
     return Pick(min(ok, key=priority), skipped)

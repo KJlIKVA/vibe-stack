@@ -20,7 +20,7 @@ class FakeNotion:
         self.rows: dict[str, list[dict[str, Any]]] = {}  # ds id → pages
         self.blocks = SimpleNamespace(children=SimpleNamespace(list=self._children))
         self.databases = SimpleNamespace(retrieve=self._db_retrieve, create=self._db_create)
-        self.data_sources = SimpleNamespace(query=self._query)
+        self.data_sources = SimpleNamespace(query=self._query, retrieve=self._ds_retrieve, update=self._ds_update)
         self.pages = SimpleNamespace(create=self._page_create, update=self._page_update)
 
     def _children(self, block_id: str, start_cursor: str | None = None) -> dict[str, Any]:
@@ -28,6 +28,16 @@ class FakeNotion:
 
     def _db_retrieve(self, database_id: str) -> dict[str, Any]:
         return {"id": database_id, "data_sources": [{"id": self.dbs[database_id]["ds"]}]}
+
+    def _db_by_ds(self, ds_id: str) -> dict[str, Any]:
+        return next(d for d in self.dbs.values() if d["ds"] == ds_id)
+
+    def _ds_retrieve(self, data_source_id: str) -> dict[str, Any]:
+        return {"id": data_source_id, "properties": dict(self._db_by_ds(data_source_id)["props"])}
+
+    def _ds_update(self, data_source_id: str, properties) -> dict[str, Any]:
+        self._db_by_ds(data_source_id)["props"].update(properties)
+        return self._ds_retrieve(data_source_id)
 
     def _db_create(self, parent, title, initial_data_source) -> dict[str, Any]:
         db_id, ds_id = uuid.uuid4().hex, uuid.uuid4().hex
@@ -175,3 +185,25 @@ def test_create_not_retried_after_timeout(cfg) -> None:
     with pytest.raises(BoardUnavailable):
         b.add_post(PostRecord(title="t", rubric="tool", status=Status.APPROVED, html="x"))
     assert len(calls) == 1  # строка могла создаться — повтор дал бы дубль
+
+
+def test_setup_adds_new_columns_to_existing_databases(board) -> None:
+    b, fake = board
+    b.setup()
+    posts = next(d for d in fake.dbs.values() if d["title"] == "Posts")
+    del posts["props"]["Время публикации"]  # база создана старой версией
+    b._ds = None
+    assert b.setup() == []
+    assert "Время публикации" in posts["props"]
+
+
+def test_planned_time_roundtrip_in_local_tz(board, now) -> None:
+    b, fake = board
+    b.setup()
+    ref = b.add_post(PostRecord(title="T", rubric="tool", status=Status.APPROVED, html="x"))
+    b.update_post(ref, planned_at=now)
+    row = next(r for rows in fake.rows.values() for r in rows if r["id"] == ref)
+    assert row["properties"]["Время публикации"]["date"]["start"].endswith("+03:00")
+    (p,) = b.posts_with_status(Status.APPROVED)
+    assert p.planned_at == now
+

@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from vibe_stack.dayplan import slot_grid, spread
 from vibe_stack.models import PostRecord, Status
 from vibe_stack.planner import pick_next, same_topic, topic_tokens
-from vibe_stack.publish import active_slot
 from vibe_stack.storage import PublishedRow
 from vibe_stack.timeutil import local_date
 
@@ -93,12 +93,25 @@ def test_topic_tokens_repo_match() -> None:
     assert same_topic(a, b, 0.9)
 
 
-def test_active_slot() -> None:
-    slots = ["10:00", "14:00", "18:00"]
-    assert active_slot(datetime(2026, 10, 7, 10, 30, tzinfo=MSK), slots, 120) == "10:00"
-    assert active_slot(datetime(2026, 10, 7, 12, 30, tzinfo=MSK), slots, 120) is None
-    assert active_slot(datetime(2026, 10, 7, 9, 59, tzinfo=MSK), slots, 120) is None
-    assert active_slot(datetime(2026, 10, 7, 18, 1, tzinfo=MSK), slots, 120) == "18:00"
+def test_spread_evenly_over_free_slots() -> None:
+    grid = slot_grid(datetime(2026, 10, 7).date(), [f"{h:02d}:{m:02d}" for h in range(8, 24) for m in (0, 30)],
+                     "Europe/Moscow")
+    times = [f"{t:%H:%M}" for t in spread(grid, 8)]
+    assert times == ["08:00", "10:00", "12:30", "14:30", "17:00", "19:00", "21:30", "23:30"]
+    assert [f"{t:%H:%M}" for t in spread(grid, 1)] == ["08:00"]  # один пост — в ближайший слот
+    assert len(spread(grid, 40)) == 32
+
+
+def test_soft_rubric_repeat_prefers_other_rubric(cfg, now) -> None:
+    hist = [published("Old", "tool", "https://a.dev/x", now - timedelta(hours=2))]
+    q = [post("Tool B", "tool", "https://b.dev/x", score=14, now=now),
+         post("Trick C", "trick", "https://c.dev/x", score=10, now=now)]
+    assert pick(q, hist, cfg, now).post.title == "Trick C"
+    only_tools = [post("Tool B", "tool", "https://b.dev/x", now=now)]
+    assert pick(only_tools, hist, cfg, now).post is None  # строго: та же рубрика подряд
+    soft = pick_next(only_tools, hist, today=local_date(now, "Europe/Moscow"), now=now, cfg=cfg.planner,
+                     rubric_enabled=ENABLED, soft_rubric_repeat=True)
+    assert soft.post.title == "Tool B"  # в плане дня допускается, если других нет
 
 
 def test_glossary_terms_are_different_topics(cfg, now) -> None:

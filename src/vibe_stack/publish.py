@@ -1,16 +1,16 @@
-"""Контур «Публикация»: пауза? → активный слот → очередь «Одобрено» → планировщик → Telegram → доска."""
+"""Контур «Публикация»: пауза? → план дня (dayplan) → посты, чьё время наступило → Telegram → доска."""
 
 from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from . import sandbox
+from . import dayplan, sandbox
 from .board import BoardUnavailable
 from .lint import lint_post
 from .models import PostRecord, Status
-from .planner import pick_next
 from .runtime import Runtime
 from .telegram import TelegramError
 from .urls import dedup_keys, host_of, short_id
@@ -19,18 +19,11 @@ log = logging.getLogger(__name__)
 CONTOUR = "publish"
 
 
-def active_slot(now_local: datetime, slots: list[str], window_min: int) -> str | None:
-    """Последний наступивший слот, если с его времени прошло меньше window_min минут."""
-    current = None
-    for s in sorted(slots):
-        hh, mm = (int(x) for x in s.split(":"))
-        start = now_local.replace(hour=hh, minute=mm, second=0, microsecond=0)
-        if start <= now_local < start + timedelta(minutes=window_min):
-            current = s
-    return current
+MAX_PER_TICK = 2  # если тик опоздал и наступило время двух постов, выходят оба, но не больше
 
 
 def run_publish(rt: Runtime) -> dict[str, Any]:
+    """Тик: досоставить план дня для новых постов и выпустить те, чьё время наступило."""
     summary: dict[str, Any] = {"contour": CONTOUR, "mode": rt.mode, "published": 0}
     try:
         settings = rt.settings()
@@ -46,52 +39,65 @@ def run_publish(rt: Runtime) -> dict[str, Any]:
 
     now = rt.now()
     today = rt.today()
-    slots = settings.publish_slots or rt.cfg.schedule.publish_slots
-    slot = active_slot(rt.now_local(), slots, rt.cfg.schedule.slot_window_minutes)
-    if slot is None:
-        summary["status"] = "no_active_slot"
-        return summary
     limit = settings.regular_per_day if settings.regular_per_day is not None else rt.cfg.limits.regular_per_day
     try:
         # счётчики сверяем и с состоянием, и с Notion: если ветка state потерялась, Notion не даст превысить лимит
-        on_board = board_sent_today(rt)
-        queue = rt.board.posts_with_status(Status.APPROVED)
+        on_board = [p for p in board_sent_today(rt) if not p.urgent]
+        queue = ready_queue(rt, now)
+        sent = max(rt.state.count_published(today, urgent=False), len(on_board))
+        if sent >= limit:
+            summary["status"] = "daily_limit_reached"
+            return summary
+        summary["planned"] = len(dayplan.plan(rt, queue, limit=limit, sent_today=sent,
+                                              published_times=published_today_times(rt, on_board)))
     except BoardUnavailable as e:
         rt.notifier.notify(f"публикация пропущена: {e}")
         summary["status"] = "board_unavailable"
         return summary
-    regular_on_board = [p for p in on_board if not p.urgent]
-    if rt.state.slot_filled(today, slot) or any(_in_slot(rt, p, slot) for p in regular_on_board):
-        summary["status"] = f"slot_{slot}_done"
-        return summary
-    if max(rt.state.count_published(today, urgent=False), len(regular_on_board)) >= limit:
-        summary["status"] = "daily_limit_reached"
-        return summary
 
-    # срочные (Urgent) публикует срочный контур, здесь только обычная очередь
-    queue = _drop_stale_and_published(rt, [p for p in queue if not p.urgent], now)
-    if waiting := [p for p in queue if sandbox.waiting(rt, p, now)]:
-        # ждём песочницу не дольше sandbox.max_wait_minutes, потом пост выйдет и без пометки
-        summary["sandbox_waiting"] = len(waiting)
-        queue = [p for p in queue if p not in waiting]
-    rubrics = rt.rubrics()
-    history = rt.state.published_since(today - timedelta(days=max(rt.cfg.planner.topic_repeat_days, 7) + 1))
-    pick = pick_next(
-        queue, history, today=today, now=now, cfg=rt.cfg.planner,
-        rubric_enabled={k: r.enabled for k, r in rubrics.items()},
-    )
-    if pick.post is None:
-        summary["status"] = "nothing_to_publish"
-        summary["reason"] = pick.reason
-        log.info("слот %s: публиковать нечего — %s", slot, pick.reason)
-        return summary
-    post = pick.post
-    summary["slot"] = slot
-    ok = publish_post(rt, post, slot=slot, urgent=False, counts_regular=True)
-    summary["published"] = int(ok)
-    summary["status"] = "published" if ok else "error"
-    summary["title"] = post.title
+    due = sorted((p for p in queue if p.planned_at and p.planned_at <= now), key=lambda p: p.planned_at or now)
+    summary["status"] = "nothing_to_publish"
+    if not queue:
+        summary["reason"] = "очередь пуста"
+    elif not due:
+        upcoming = min((p.planned_at for p in queue if p.planned_at), default=None)
+        summary["reason"] = (f"следующий пост в {upcoming.astimezone(ZoneInfo(rt.tz)):%d.%m %H:%M}" if upcoming
+                             else "в плане нет мест на сегодня")
+    for post in due:
+        if sent >= limit:
+            summary["status"] = "daily_limit_reached"
+            break
+        if summary["published"] >= MAX_PER_TICK:
+            break
+        if sandbox.waiting(rt, post, now):
+            # ждём песочницу не дольше sandbox.max_wait_minutes, потом пост выйдет и без пометки
+            summary["sandbox_waiting"] = summary.get("sandbox_waiting", 0) + 1
+            continue
+        assert post.planned_at is not None
+        ok = publish_post(rt, post, slot=f"{post.planned_at.astimezone(ZoneInfo(rt.tz)):%H:%M}", urgent=False,
+                          counts_regular=True)
+        if not ok:
+            summary["status"] = "error"
+            break  # сбой Telegram или Notion — остальное в следующий тик
+        sent += 1
+        summary["published"] += 1
+        summary["status"] = "published"
+        summary.setdefault("titles", []).append(post.title)
     return summary
+
+
+def ready_queue(rt: Runtime, now: datetime) -> list[PostRecord]:
+    """Обычные посты «Одобрено», которые ещё можно публиковать (срочные выпускает срочный контур)."""
+    queue = rt.board.posts_with_status(Status.APPROVED)
+    return _drop_stale_and_published(rt, [p for p in queue if not p.urgent], now)
+
+
+def published_today_times(rt: Runtime, on_board: list[PostRecord]) -> list[datetime]:
+    """Когда сегодня выходили обычные посты (по состоянию и по Notion) — эти слоты в плане заняты."""
+    times = [p.published_at for p in on_board if p.published_at]
+    times += [h.published_at for h in rt.state.published_since(rt.today())
+              if h.local_date == rt.today() and not h.urgent and h.counts_regular]
+    return times
 
 
 def _day_start_utc(rt: Runtime) -> datetime:
@@ -104,15 +110,6 @@ def board_sent_today(rt: Runtime) -> list[PostRecord]:
     sent = rt.board.published_since(start)
     sending = [p for p in rt.board.posts_with_status(Status.SENDING) if p.published_at and p.published_at >= start]
     return sent + sending
-
-
-def _in_slot(rt: Runtime, p: PostRecord, slot: str) -> bool:
-    if not p.published_at:
-        return False
-    hh, mm = (int(x) for x in slot.split(":"))
-    start = rt.now_local().replace(hour=hh, minute=mm, second=0, microsecond=0)
-    at = p.published_at.astimezone(start.tzinfo)
-    return start <= at < start + timedelta(minutes=rt.cfg.schedule.slot_window_minutes)
 
 
 def _drop_stale_and_published(rt: Runtime, queue: list[PostRecord], now: datetime) -> list[PostRecord]:

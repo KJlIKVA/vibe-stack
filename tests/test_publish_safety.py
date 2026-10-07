@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -15,6 +16,7 @@ from vibe_stack.runtime import Runtime
 from vibe_stack.storage import State
 from vibe_stack.telegram import DryRunTelegram, Notifier, TelegramError
 
+MSK = ZoneInfo("Europe/Moscow")
 HTML = ('🛠 <b>{t}</b>\n\nСуть.\n<a href="{u}">Первоисточник</a>\n✅ Сверено с первоисточником · #инструмент')
 
 
@@ -62,9 +64,10 @@ def test_lost_state_does_not_reopen_filled_slot(cfg, tmp_path, now) -> None:
     # в Notion пост уже вышел в этом слоте (10:20 МСК), а состояние пустое — как после потери ветки state
     board.add_post(PostRecord(title="Earlier", rubric="trick", status=Status.PUBLISHED, source_url="https://x.dev/1",
                               source_domain="x.dev", published_at=now - timedelta(minutes=10), html="x"))
-    approved(board, now)
-    assert run_publish(rt)["status"] == "slot_10:00_done"
+    ref = approved(board, now)
+    assert run_publish(rt)["status"] == "nothing_to_publish"  # слот 10:00 занят — пост встал на 14:00
     assert rt.tg.sent == []
+    assert f"{board.get(ref).planned_at.astimezone(MSK):%H:%M}" == "14:00"
 
 
 def test_daily_limit_counted_from_board_too(cfg, tmp_path, now) -> None:
@@ -89,7 +92,7 @@ def test_uncertain_send_is_not_retried_and_blocks_slot(cfg, tmp_path, now) -> No
     # следующий запуск в том же слоте не отправляет второй пост и не повторяет первый
     rt._settings = None
     tg.error = None
-    assert run_publish(rt)["status"] == "slot_10:00_done"
+    assert run_publish(rt)["status"] == "nothing_to_publish"  # слот 10:00 считается занятым
     assert tg.attempts == 1 and rt.board.get(other).status == Status.APPROVED
 
 
@@ -100,7 +103,7 @@ def test_no_send_without_sending_marker(cfg, tmp_path, now) -> None:
 
     board = NoWrites(tmp_path / "b.json")
     rt = make_rt(cfg, tmp_path, now, board=board)
-    approved(board, now)
+    approved(board, now, planned_at=now - timedelta(minutes=5))  # время уже стоит: проверяем именно маркер
     assert run_publish(rt)["status"] == "error"
     assert rt.tg.sent == []
 
@@ -117,7 +120,7 @@ def test_sending_marker_then_published(cfg, tmp_path, now) -> None:
     rt = make_rt(cfg, tmp_path, now, board=board)
     ref = approved(board, now)
     assert run_publish(rt)["status"] == "published"
-    assert seen == [Status.SENDING, Status.PUBLISHED]
+    assert [x for x in seen if x] == [Status.SENDING, Status.PUBLISHED]  # первая запись — время из плана дня
     assert board.get(ref).tg_message_id == -1
 
 

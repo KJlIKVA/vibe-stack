@@ -192,6 +192,7 @@ class PostRecord(BaseModel):
     html: str = ""
     verify: dict[str, Any] | None = None
     candidate_id: str | None = None
+    planned_at: datetime | None = None  # время публикации из плана дня (можно поменять в Notion)
 
 
 class GlossaryResult(BaseModel):
