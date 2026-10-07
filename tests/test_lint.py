@@ -88,3 +88,25 @@ def test_title_numbers_are_not_verified() -> None:
     """Заголовок из источника — не проверенный факт: «40 языков» из заголовка без подтверждения не пройдёт."""
     post = GOOD.replace("Суть.", "Переводит код между 40 языками.")
     assert "unverified_numbers:40" in lint(post, allowed_text="codetrans переводит код между Python и JavaScript")
+
+
+ANALYSIS = (
+    "🧠 <b>Мнение ИИ: тема</b>\n\n<b>О чём статья</b> — в статье сказано, что X.\n"
+    "<b>Что здесь любопытно</b> — на наш взгляд, Y.\n<b>Что делать</b> — Z.\n\n"
+    '<a href="https://github.com/acme/tool">Статья</a> · #разбор'
+)
+
+
+def test_analysis_rules() -> None:
+    assert lint(ANALYSIS, rubric="analysis", max_chars=1500) == []
+    assert "analysis_no_ai_opinion_mark" in lint(ANALYSIS.replace("Мнение ИИ: ", ""), rubric="analysis",
+                                                  max_chars=1500)
+    assert "analysis_no_opinion_marker" in lint(ANALYSIS.replace("на наш взгляд", "думаю"), rubric="analysis",
+                                                 max_chars=1500)
+    fake = ANALYSIS.replace("Y.", "Y, мы попробовали это у себя.")
+    assert "analysis_fake_experience" in lint(fake, rubric="analysis", max_chars=1500)
+    two = ANALYSIS.replace("X.", "«агенты читают репозиторий до того как действовать» и "
+                                 "«держите файл коротким и простым всегда».")
+    assert "analysis_quotes:2>1" in lint(two, rubric="analysis", max_chars=1500)
+    name_only = ANALYSIS.replace("X.", "инструмент «Claude Code» полезен.")
+    assert lint(name_only, rubric="analysis", max_chars=1500) == []

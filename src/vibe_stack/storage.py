@@ -81,6 +81,13 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     ok INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS glossary (
+    term TEXT PRIMARY KEY,
+    source_url TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    published_at TEXT NOT NULL,
+    post_url TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_candidates_date ON candidates(local_date);
 CREATE INDEX IF NOT EXISTS idx_published_date ON published(local_date);
 CREATE INDEX IF NOT EXISTS idx_llm_date ON llm_calls(local_date);
@@ -256,6 +263,19 @@ class State:
 
     def llm_calls_in_run(self, run_id: str) -> int:
         return self.db.execute("SELECT COUNT(*) FROM llm_calls WHERE run_id=?", (run_id,)).fetchone()[0]
+
+    # --- словарь ---------------------------------------------------------------------------
+    def add_glossary(self, *, term: str, source_url: str, definition: str, published_at: datetime,
+                     post_url: str | None) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO glossary(term, source_url, definition, published_at, post_url) VALUES (?,?,?,?,?)",
+            (term, source_url, definition, iso(published_at), post_url),
+        )
+        self.db.commit()
+
+    def glossary_entries(self) -> list[sqlite3.Row]:
+        """Опубликованные термины, новые первыми."""
+        return self.db.execute("SELECT * FROM glossary ORDER BY published_at DESC").fetchall()
 
     # --- kv ---------------------------------------------------------------------------
     def get(self, key: str) -> str | None:

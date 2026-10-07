@@ -29,7 +29,7 @@ from .telegram import DryRunTelegram, Notifier, Telegram
 from .timeutil import local_date, parse_dt, utc_now
 
 log = logging.getLogger("vibe_stack")
-CONTOURS = ("collect", "publish", "urgent", "weekly")
+CONTOURS = ("collect", "publish", "urgent", "weekly", "pin", "glossary")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -53,7 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     ev.add_argument("--fixtures", default="tests/fixtures")
     ev.add_argument("--llm", choices=("fake", "real"), default="fake",
                     help="fake — ответы из фикстур; real — настоящая модель из config.yaml")
-    ev.add_argument("--phase", type=int, default=1)
+    ev.add_argument("--phase", type=int, default=2)
     ev.add_argument("--only", help="id фикстуры")
     sub.add_parser("notion-setup", help="создать базы Notion под NOTION_ROOT_PAGE_ID")
     sub.add_parser("status", help="счётчики за сегодня и расходы")
@@ -151,12 +151,18 @@ def build_runtime(args: argparse.Namespace, cfg: Config, contour: str) -> Runtim
 
 def run_contour(args: argparse.Namespace, cfg: Config) -> int:
     from .collect import run_collect
+    from .glossary import run_glossary
+    from .leaderboards import build_adapters
+    from .pin import run_pin
     from .publish import run_publish
     from .urgent import run_urgent
     from .weekly import run_weekly
 
     rt = build_runtime(args, cfg, args.command)
-    fn = {"collect": run_collect, "publish": run_publish, "urgent": run_urgent, "weekly": run_weekly}[args.command]
+    fn = {
+        "collect": run_collect, "publish": run_publish, "urgent": run_urgent, "weekly": run_weekly,
+        "pin": lambda r: run_pin(r, build_adapters(cfg)), "glossary": run_glossary,
+    }[args.command]
     status_ = "ok"
     try:
         summary = fn(rt)

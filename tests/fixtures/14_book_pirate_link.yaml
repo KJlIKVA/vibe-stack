@@ -1,0 +1,14 @@
+id: "14"
+phase: 2
+description: Книга — ссылка ведёт на пиратский сайт → отклонено ad
+scenario: collect
+expected:
+  decision: rejected
+  stage: prefilter
+  reasons_include: [ad]
+candidates:
+  - source: hackernews
+    source_type: hackernews
+    url: https://libgen.is/book/index.php?md5=0123456789abcdef
+    title: "The Agentic Coding Handbook (PDF)"
+    published_days_ago: 2

@@ -13,7 +13,14 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, TypeVar
 
-from .board import BoardSettings, BoardUnavailable, RubricOverride, SourceOverride, validate_settings
+from .board import (
+    BoardSettings,
+    BoardUnavailable,
+    GlossaryEntry,
+    RubricOverride,
+    SourceOverride,
+    validate_settings,
+)
 from .config import Config
 from .models import HARD_STOPS, PostRecord, Status
 from .timeutil import iso, parse_dt
@@ -360,6 +367,30 @@ class NotionBoard:
         props = self._props(fields)
         self._write("обновить строку поста", lambda: self.client.pages.update(page_id=ref, properties=props),
                     idempotent=True)
+
+    def add_glossary(self, entry: GlossaryEntry) -> None:
+        ds = self._ds_id(DB_GLOSSARY)
+        props = {
+            "Термин": {"title": _text(entry.term)},
+            "Определение": {"rich_text": _text(entry.definition)},
+            "Источник": {"url": entry.source_url},
+            "Дата публикации": {"date": {"start": iso(entry.published_at)}},
+            "Ссылка на пост": {"url": entry.post_url},
+        }
+        self._write("добавить термин в словарь", lambda: self.client.pages.create(
+            parent={"type": "data_source_id", "data_source_id": ds}, properties=props), idempotent=False)
+
+    def add_leaderboard_row(self, snap: Any) -> None:
+        ds = self._ds_id(DB_LEADERBOARD)
+        props = {
+            "Запись": {"title": _text(f"{snap.label} · {snap.date}")},
+            "Дата": {"date": {"start": snap.date}},
+            "Источник рейтинга": {"select": {"name": snap.label}},
+            "Топ-3": {"rich_text": _text(" · ".join(f"{i}. {m}" for i, m in enumerate(snap.top[:3], 1)))},
+            "Ссылка на данные": {"url": snap.data_url},
+        }
+        self._write("записать историю рейтинга", lambda: self.client.pages.create(
+            parent={"type": "data_source_id", "data_source_id": ds}, properties=props), idempotent=False)
 
     # --- первичная настройка ---------------------------------------------------------------------------
     def setup(self) -> list[str]:

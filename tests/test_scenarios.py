@@ -9,12 +9,12 @@ from vibe_stack.storage import State
 
 from .conftest import FIXTURES, NOW
 
-PHASE1 = load_fixtures(FIXTURES, NOW, max_phase=1)
+PHASE1 = load_fixtures(FIXTURES, NOW, max_phase=2)
 
 
 def test_all_phase1_fixtures_present() -> None:
     assert sorted(f.id for f in PHASE1) == ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12",
-                                            "15", "18"]
+                                            "13", "14", "15", "16", "17", "18"]
 
 
 @pytest.mark.parametrize("fx", PHASE1, ids=[f"{f.id}-{f.scenario}" for f in PHASE1])
@@ -85,7 +85,7 @@ def test_approve_flow_publishes_only_after_approval(cfg, tmp_path) -> None:
     res = run_scenario(_get("15"), cfg, NOW, workdir=tmp_path)
     assert res.ok, res.mismatches
     assert res.actual["publish_before"]["status"] == "nothing_to_publish"
-    assert len(res.sent) == 1 and "diffguard" in res.sent[0][1]
+    assert len(res.sent) == 1 and "Мнение ИИ" in res.sent[0][1]
 
 
 def test_collect_runs_once_per_day_in_publish_mode(cfg, tmp_path) -> None:

@@ -1,0 +1,51 @@
+id: "13"
+phase: 2
+description: Книга — страница издателя с описанием и ссылкой на бесплатную версию → 📚 публикуется со ссылкой на официальный источник
+scenario: collect
+expected:
+  decision: queued
+  rubric: book_video
+  board_statuses: ["Одобрено"]
+candidates:
+  - source: hackernews
+    source_type: hackernews
+    url: https://press.example-books.org/titles/agentic-coding-handbook
+    title: "The Agentic Coding Handbook — free online edition"
+    published_days_ago: 4
+    document:
+      text: |
+        The Agentic Coding Handbook
+        By Maria Chen. Published by Example Books Press, September 2026. 240 pages. Language: English.
+
+        A practical guide to working with AI coding agents: writing specs agents can follow, reviewing
+        agent-generated diffs, setting up tests as guardrails, and keeping secrets out of prompts.
+
+        Contents: 1. Specs for agents. 2. Review loops. 3. Tests as guardrails. 4. Secrets and permissions.
+
+        Read the full book free online on this page, or buy the print edition ($39) from the publisher.
+    llm:
+      score:
+        category: book_video
+        scores: {novelty: 3, usefulness: 4, verifiability: 3, substance: 2, audience_fit: 2}
+        hard_stops: []
+        reason: Свежая практическая книга, бесплатная онлайн-версия у издателя
+        claims:
+          - "«The Agentic Coding Handbook» — книга Марии Чен, издательство Example Books Press, сентябрь 2026 года, 240 страниц, на английском."
+          - "Книга о работе с AI coding-агентами: спецификации для агентов, ревью диффов, тесты как ограничители и защита секретов."
+          - "Полная версия бесплатно доступна онлайн на странице издателя; печатное издание стоит $39."
+      verify:
+        verdict: pass
+        fail_reason: ""
+        checks:
+          - {claim: "«The Agentic Coding Handbook» — книга Марии Чен, издательство Example Books Press, сентябрь 2026 года, 240 страниц, на английском.", status: supported, evidence: "шапка страницы"}
+          - {claim: "Книга о работе с AI coding-агентами: спецификации для агентов, ревью диффов, тесты как ограничители и защита секретов.", status: supported, evidence: "описание и оглавление"}
+          - {claim: "Полная версия бесплатно доступна онлайн на странице издателя; печатное издание стоит $39.", status: supported, evidence: "последний абзац"}
+        approved_claims: []
+      write: |
+        📚 <b>The Agentic Coding Handbook</b> — Мария Чен, книга, английский, 240 страниц.
+
+        Практическое руководство по работе с AI coding-агентами: как писать спецификации, проверять диффы от агента, ставить тесты ограничителями и не допускать секреты в промпты. Пересказ по описанию и оглавлению.
+        Кому подойдёт: новичкам и среднему уровню.
+        <b>Где взять:</b> бесплатно онлайн на странице издателя; печатное издание — $39.
+
+        <a href="https://press.example-books.org/titles/agentic-coding-handbook">Ссылка</a> · #книга

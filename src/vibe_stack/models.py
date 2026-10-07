@@ -192,3 +192,18 @@ class PostRecord(BaseModel):
     html: str = ""
     verify: dict[str, Any] | None = None
     candidate_id: str | None = None
+
+
+class GlossaryResult(BaseModel):
+    id: str
+    term: str
+    has_definition: bool
+    hard_stops: list[HardStop] = Field(default_factory=list)
+    claims: list[str] = Field(default_factory=list)
+    example: str = ""
+    not_to_confuse: str = ""
+
+    @field_validator("claims")
+    @classmethod
+    def _cut_claims(cls, v: list[str]) -> list[str]:
+        return [c.strip() for c in v if c.strip()][:4]

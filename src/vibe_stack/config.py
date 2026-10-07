@@ -116,6 +116,17 @@ class Prefilter(BaseModel):
     affiliate_params: list[str] = Field(default_factory=list)
 
 
+class GlossaryTerm(BaseModel):
+    term: str
+    aliases: list[str] = Field(default_factory=list)
+    source: str
+
+
+class GlossaryConfig(BaseModel):
+    telegraph_page: bool = True
+    terms: list[GlossaryTerm] = Field(default_factory=list)
+
+
 class Rubric(BaseModel):
     emoji: str
     hashtag: str
@@ -156,6 +167,7 @@ class Config(BaseModel):
     dedup: Dedup = Field(default_factory=Dedup)
     prefilter: Prefilter = Field(default_factory=Prefilter)
     rubrics: dict[str, Rubric]
+    glossary: GlossaryConfig = Field(default_factory=GlossaryConfig)
     sources: list[SourceConfig] = Field(default_factory=list)
 
     def rubric(self, key: str) -> Rubric:

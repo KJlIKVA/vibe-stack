@@ -15,6 +15,13 @@ VERIFIED_MARK = "✅ Сверено с первоисточником"
 FORBIDDEN_MARKS = ("Запущено",)
 HYPE_WORDS = ("революци", "game changer", "game-changer", "невероятн")
 STANDARD_RUBRICS = {"tool", "skill_mcp", "trick", "case"}
+# раздел 6: выдуманный личный опыт в «Разборе» запрещён
+FAKE_EXPERIENCE_RE = re.compile(
+    r"\b(?:я|мы)\s+(?:сам[аи]?\s+)?(?:попробовал[аи]?|протестировал[аи]?|тестировал[аи]?|проверил[аи]?|"
+    r"запустил[аи]?|использовал[аи]?|внедрил[аи]?)\b|по\s+(?:моему|нашему)\s+опыту|в\s+(?:моей|нашей)\s+практике",
+    re.IGNORECASE,
+)
+_QUOTE_RE = re.compile(r"«([^»]+)»|“([^”]+)”|\"([^\"]+)\"")
 _NUM_RE = re.compile(r"\d+(?:[.,]\d+)*")
 # Telegram сам превращает в ссылки голые URL, домены и @упоминания — в обычном тексте их быть не должно
 _AUTOLINK_TLDS = ("com|org|net|io|dev|ai|app|sh|xyz|ru|me|co|gg|tv|info|biz|site|online|link|click|top|so|to|ly|"
@@ -104,6 +111,27 @@ def _numbers(text: str) -> set[str]:
     return out
 
 
+def _analysis_rules(text: str) -> list[str]:
+    """Раздел 6: пометка «Мнение ИИ», факты отделены от мнения, не больше одной цитаты до 15 слов."""
+    errors = []
+    low = text.lower()
+    if "мнение ии" not in low:
+        errors.append("analysis_no_ai_opinion_mark")
+    if "в статье сказано" not in low:
+        errors.append("analysis_no_facts_marker")
+    if "на наш взгляд" not in low:
+        errors.append("analysis_no_opinion_marker")
+    if FAKE_EXPERIENCE_RE.search(text):
+        errors.append("analysis_fake_experience")
+    # цитата — фрагмент в кавычках от 5 слов (короче — обычно название)
+    quotes = [q for m in _QUOTE_RE.finditer(text) for q in m.groups() if q and len(q.split()) >= 5]
+    if len(quotes) > 1:
+        errors.append(f"analysis_quotes:{len(quotes)}>1")
+    if any(len(q.split()) > 15 for q in quotes):
+        errors.append("analysis_quote_too_long")
+    return errors
+
+
 def lint_post(
     post: str,
     *,
@@ -160,6 +188,8 @@ def lint_post(
             errors.append("link_not_source")  # тот же домен, но не та страница (например, другой репозиторий)
     if rubric in STANDARD_RUBRICS and VERIFIED_MARK not in parsed.text:
         errors.append("missing_verified_mark")
+    if rubric == "analysis":
+        errors += _analysis_rules(parsed.text)
     if stray:
         errors.append("unverified_numbers:" + ",".join(stray[:5]))
     return errors

@@ -1,0 +1,21 @@
+id: "16"
+phase: 2
+description: Данные Arena недоступны → закреп не обновляется, прошлая дата остаётся, запись в лог
+scenario: pin
+preseed:
+  pin:
+    message_id: 42
+    snapshots:
+      arena_text:
+        label: "Arena · текст"
+        date: "2026-10-05"
+        top: ["Model A", "Model B", "Model C"]
+        data_url: https://example.org/arena
+leaderboards:
+  - {key: arena_text, label: "Arena · текст", fail: true}
+expected:
+  sent: 0
+  no_decisions: true
+  summary:
+    summary.status: unchanged
+    edited: 0

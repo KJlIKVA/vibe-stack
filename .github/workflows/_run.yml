@@ -62,7 +62,7 @@ jobs:
         run: |
           status=0
           for c in $COMMANDS; do
-            case "$c" in collect|publish|urgent|weekly) ;; *) echo "неизвестный контур $c"; exit 2;; esac
+            case "$c" in collect|publish|urgent|weekly|pin|glossary) ;; *) echo "неизвестный контур $c"; exit 2;; esac
             uv run --no-sync vibe-stack "$c" "--$MODE" $FORCE || status=1
           done
           exit $status

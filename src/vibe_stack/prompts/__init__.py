@@ -73,6 +73,13 @@ def triage_prompt(candidate: dict[str, Any], source_document: str) -> str:
     })
 
 
+def glossary_prompt(candidate: dict[str, Any], source_document: str) -> str:
+    return render(load("glossary_G"), {
+        "candidate_json": json.dumps(candidate, ensure_ascii=False),
+        "первоисточник, обрезанный": source_document,
+    })
+
+
 def verify_prompt(claims: list[str], source_document: str, meta: dict[str, Any]) -> str:
     return render(load("verify_B"), {
         "утверждения": json.dumps(claims, ensure_ascii=False),

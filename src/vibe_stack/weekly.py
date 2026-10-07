@@ -43,12 +43,7 @@ def reason_label(code: str) -> str:
 
 
 def post_link(rt: Runtime, message_id: int | None) -> str | None:
-    if not message_id or message_id < 0:
-        return None
-    if rt.cfg.channel.username:
-        return f"https://t.me/{rt.cfg.channel.username.lstrip('@')}/{message_id}"
-    cid = rt.channel_id.removeprefix("-100")
-    return f"https://t.me/c/{cid}/{message_id}" if cid.isdigit() else None
+    return rt.post_link(message_id)
 
 
 def compute_stats(rt: Runtime) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:

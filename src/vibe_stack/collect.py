@@ -10,6 +10,7 @@ from typing import Any
 from . import prompts
 from .board import BoardUnavailable
 from .config import Rubric
+from .glossary import run_glossary
 from .llm import BudgetExceeded, LLMError
 from .models import HARD_STOPS, Candidate, PostRecord, ScoreResult, Status
 from .runtime import Runtime
@@ -98,6 +99,14 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
     if summary["queued"] + summary["pending_approval"] == 0 and not summary["stopped"]:
         summary["reason"] = "сегодня ничего не прошло отбор"
         log.info("публикаций из сбора ноль: %s", summary["reason"])
+    if not board_failed and not summary["stopped"]:
+        try:
+            summary["glossary"] = run_glossary(rt)
+        except BudgetExceeded as e:
+            summary["glossary"] = {"status": f"stopped: {e}"}
+        except BoardUnavailable as e:
+            board_failed = True
+            rt.notifier.notify(f"«Слово дня» не подготовлено: {e}")
     if not board_failed:  # при сбое Notion второй cron-запуск дня попробует ещё раз
         rt.mark_done(done_key)
     return summary

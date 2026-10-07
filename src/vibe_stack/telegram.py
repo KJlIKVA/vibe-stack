@@ -106,6 +106,8 @@ class DryRunTelegram:
         self.out = Path(out_dir)
         self.out.mkdir(parents=True, exist_ok=True)
         self.sent: list[tuple[str, str]] = []
+        self.edited: list[tuple[int, str]] = []
+        self.pinned: list[int] = []
         self._next = -1
 
     def send_message(self, chat_id: str, text: str, *, html: bool = True, preview: bool = True,
@@ -117,9 +119,11 @@ class DryRunTelegram:
         return mid
 
     def edit_message_text(self, chat_id: str, message_id: int, text: str) -> None:
-        (self.out / f"edit{-message_id:03d}.html").write_text(text, encoding="utf-8")
+        self.edited.append((message_id, text))
+        (self.out / f"edit{abs(message_id):03d}.html").write_text(text, encoding="utf-8")
 
     def pin_chat_message(self, chat_id: str, message_id: int) -> None:
+        self.pinned.append(message_id)
         log.info("[dry-run] pin %s", message_id)
 
 

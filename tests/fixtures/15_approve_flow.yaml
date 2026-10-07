@@ -1,9 +1,6 @@
 id: "15"
-description: Рубрика в режиме approve → «На одобрении», выходит только после смены статуса на «Одобрено»
+description: Разбор статьи → «На одобрении», публикуется только после смены статуса на «Одобрено»
 scenario: approve_flow
-board:
-  rubrics:
-    tool: {mode: approve}
 expected:
   sent: 1
   board_statuses: ["Опубликовано"]
@@ -12,57 +9,48 @@ expected:
     publish_before.status: nothing_to_publish
     publish_after.status: published
 candidates:
-  - source: github-search
-    source_type: github_search
-    url: https://github.com/acme-labs/diffguard
-    title: acme-labs/diffguard
-    summary: Review your git diff with an LLM before every commit
-    published_days_ago: 8
-    updated_days_ago: 1
-    extra: {stars: 310}
+  - source: simon-willison
+    source_type: rss
+    url: https://blog.example-dev.net/why-agents-need-agents-md
+    title: Why every repo needs an AGENTS.md
+    published_days_ago: 2
     document:
       text: |
-        # diffguard
+        Why every repo needs an AGENTS.md
 
-        diffguard reviews your staged git diff with an LLM before every commit and points out
-        likely bugs, leaked secrets and missing tests.
+        Coding agents read the repository before they act. Without written conventions they guess:
+        which test command to run, which directories are generated, what style to follow.
+        An AGENTS.md file at the root gives them these rules in plain language.
 
-        ## Install
+        In our survey of 50 open-source repositories that added AGENTS.md, maintainers reported fewer
+        agent pull requests that touched generated files. The survey is self-reported and small.
 
-            pipx install diffguard
-            diffguard install-hook
-
-        The hook runs on `git commit`. Use `--no-verify` to skip it once.
-
-        ## Limitations
-
-        Requires an OpenAI-compatible API key. Large diffs (over 2000 lines) are skipped.
+        Keep the file short: commands, boundaries, style. Update it when the build changes.
     llm:
       score:
-        category: tool
-        scores: {novelty: 3, usefulness: 4, verifiability: 3, substance: 2, audience_fit: 2}
+        category: analysis_candidate
+        scores: {novelty: 2, usefulness: 4, verifiability: 3, substance: 2, audience_fit: 2}
         hard_stops: []
-        reason: Понятный инструмент проверки диффа перед коммитом
+        reason: Статья с тезисом, о котором есть смысл порассуждать; факты проверяемы
         claims:
-          - "diffguard проверяет подготовленный git diff с помощью LLM перед каждым коммитом и ищет вероятные баги, утёкшие секреты и недостающие тесты."
-          - "Установка: pipx install diffguard, затем diffguard install-hook."
-          - "Нужен ключ OpenAI-совместимого API; диффы больше 2000 строк пропускаются."
+          - "В статье сказано, что coding-агенты без записанных правил угадывают тестовую команду, сгенерированные папки и стиль."
+          - "Автор советует положить в корень репозитория файл AGENTS.md с правилами простым языком."
+          - "В опросе 50 open-source репозиториев с AGENTS.md мейнтейнеры сообщили о меньшем числе PR от агентов, которые трогают сгенерированные файлы; опрос маленький и основан на самоотчётах."
+          - "Совет: держать файл коротким — команды, границы, стиль — и обновлять при изменении сборки."
       verify:
         verdict: pass
         fail_reason: ""
         checks:
-          - {claim: "diffguard проверяет подготовленный git diff с помощью LLM перед каждым коммитом и ищет вероятные баги, утёкшие секреты и недостающие тесты.", status: supported, evidence: "первый абзац"}
-          - {claim: "Установка: pipx install diffguard, затем diffguard install-hook.", status: supported, evidence: "Install"}
-          - {claim: "Нужен ключ OpenAI-совместимого API; диффы больше 2000 строк пропускаются.", status: supported, evidence: "Limitations"}
+          - {claim: "В статье сказано, что coding-агенты без записанных правил угадывают тестовую команду, сгенерированные папки и стиль.", status: supported, evidence: "первый абзац"}
+          - {claim: "Автор советует положить в корень репозитория файл AGENTS.md с правилами простым языком.", status: supported, evidence: "первый абзац"}
+          - {claim: "В опросе 50 open-source репозиториев с AGENTS.md мейнтейнеры сообщили о меньшем числе PR от агентов, которые трогают сгенерированные файлы; опрос маленький и основан на самоотчётах.", status: supported, evidence: "второй абзац"}
+          - {claim: "Совет: держать файл коротким — команды, границы, стиль — и обновлять при изменении сборки.", status: supported, evidence: "последний абзац"}
         approved_claims: []
       write: |
-        🛠 <b>diffguard: ИИ-проверка диффа перед коммитом</b>
+        🧠 <b>Мнение ИИ: зачем репозиторию AGENTS.md</b>
 
-        diffguard прогоняет подготовленный git diff через LLM перед каждым коммитом и ищет вероятные баги, утёкшие секреты и недостающие тесты.
+        <b>О чём статья</b> — в статье сказано, что coding-агенты без записанных правил угадывают тестовую команду, сгенерированные папки и стиль. Автор предлагает файл AGENTS.md в корне репозитория; в опросе 50 репозиториев мейнтейнеры отметили меньше PR от агентов в сгенерированные файлы.
+        <b>Что здесь любопытно или спорно</b> — на наш взгляд, идея здравая, но доказательная база слабая: опрос маленький и основан на самоотчётах, так что это скорее наблюдение, чем результат.
+        <b>Что с этим делать читателю</b> — начните с короткого файла: команды, границы, стиль — и обновляйте его вместе со сборкой.
 
-        <b>Зачем это вам:</b> ошибки и случайно закоммиченные ключи ловятся до того, как попадут в репозиторий.
-        <b>Как попробовать за 5 минут:</b> <code>pipx install diffguard</code>, затем <code>diffguard install-hook</code>.
-        <b>Подводный камень:</b> нужен ключ OpenAI-совместимого API, а диффы больше 2000 строк пропускаются.
-
-        <a href="https://github.com/acme-labs/diffguard">Первоисточник</a>
-        ✅ Сверено с первоисточником · #инструмент
+        <a href="https://blog.example-dev.net/why-agents-need-agents-md">Статья</a> · #разбор

@@ -41,6 +41,7 @@ class Runtime:
     sources_factory: SourcesFactory
     fixture_candidates: list[Candidate] | None = None
     force: bool = False  # --force: пропустить защиту «уже запускался сегодня/на этой неделе»
+    glossary_page: Any = None  # публичная страница словаря (Telegraph) или None
     _settings: BoardSettings | None = field(default=None, repr=False)
 
     # --- настройки с учётом доски ---------------------------------------------------------------------------
@@ -98,6 +99,15 @@ class Runtime:
                 continue
             chosen.append(s)
         return self.sources_factory(chosen)
+
+    def post_link(self, message_id: int | None) -> str | None:
+        """Ссылка на пост в канале (для словаря и итогов недели)."""
+        if not message_id or message_id < 0:
+            return None
+        if self.cfg.channel.username:
+            return f"https://t.me/{self.cfg.channel.username.lstrip('@')}/{message_id}"
+        cid = self.channel_id.removeprefix("-100")
+        return f"https://t.me/c/{cid}/{message_id}" if cid.isdigit() else None
 
     # --- «один раз за период» ---------------------------------------------------------------------------
     def already_done(self, key: str) -> bool:

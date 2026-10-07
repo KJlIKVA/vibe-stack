@@ -71,6 +71,15 @@ class Board(Protocol):
     def update_post(self, ref: str, **fields: Any) -> None: ...
     def posts_with_status(self, status: Status) -> list[PostRecord]: ...
     def published_since(self, since: datetime) -> list[PostRecord]: ...
+    def add_glossary(self, entry: GlossaryEntry) -> None: ...
+
+
+class GlossaryEntry(BaseModel):
+    term: str
+    definition: str
+    source_url: str
+    published_at: datetime
+    post_url: str | None = None
 
 
 class _LocalData(BaseModel):
@@ -78,6 +87,7 @@ class _LocalData(BaseModel):
     rubrics: dict[str, RubricOverride] = Field(default_factory=dict)
     sources: dict[str, SourceOverride] = Field(default_factory=dict)
     posts: list[PostRecord] = Field(default_factory=list)
+    glossary: list[GlossaryEntry] = Field(default_factory=list)
 
 
 class LocalBoard:
@@ -129,6 +139,10 @@ class LocalBoard:
         return [p for p in self.data.posts
                 if p.status == Status.PUBLISHED and p.published_at and p.published_at >= since]
 
+    def add_glossary(self, entry: GlossaryEntry) -> None:
+        self.data.glossary.append(entry)
+        self._save()
+
     def get(self, ref: str) -> PostRecord:
         return next(p for p in self.data.posts if p.ref == ref)
 
@@ -167,6 +181,9 @@ class RecordingBoard:
 
     def published_since(self, since: datetime) -> list[PostRecord]:
         return self.inner.published_since(since)
+
+    def add_glossary(self, entry: GlossaryEntry) -> None:
+        self._log("add_glossary", entry.model_dump())
 
 
 def _json_default(o: Any) -> Any:

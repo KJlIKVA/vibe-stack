@@ -16,7 +16,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from .config import LLMConfig, env
-from .models import HARD_STOPS, ScoreResult, TriageResult, VerifyResult
+from .models import HARD_STOPS, GlossaryResult, ScoreResult, TriageResult, VerifyResult
 from .storage import State
 from .timeutil import Clock, local_date
 
@@ -75,8 +75,18 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         "reason": _STR,
         "claims": _STR_LIST,
     }),
+    "glossary": _obj({
+        "id": _STR,
+        "term": _STR,
+        "has_definition": {"type": "boolean"},
+        "hard_stops": _HARD_STOPS,
+        "claims": _STR_LIST,
+        "example": _STR,
+        "not_to_confuse": _STR,
+    }),
 }
-RESULT_MODELS: dict[str, type[BaseModel]] = {"score": ScoreResult, "verify": VerifyResult, "triage": TriageResult}
+RESULT_MODELS: dict[str, type[BaseModel]] = {"score": ScoreResult, "verify": VerifyResult, "triage": TriageResult,
+                                             "glossary": GlossaryResult}
 
 
 class Usage(BaseModel):

@@ -31,6 +31,7 @@ llm:
     write:   {model: gpt-5.6-terra, effort: medium, max_output_tokens: 8000}    # промпт C
     triage:  {model: gpt-5.6-terra, effort: low,    max_output_tokens: 6000}    # промпт U (срочное)
     weekly:  {model: gpt-5.6-terra, effort: medium, max_output_tokens: 8000}    # промпт D
+    glossary: {model: gpt-5.6-terra, effort: low,   max_output_tokens: 6000}    # промпт G (слово дня)
 
 limits:
   regular_per_day: 3
@@ -79,17 +80,38 @@ prefilter:
   affiliate_params: [ref, aff, affid, aff_id, affiliate, affiliate_id, via, partner, partner_id, tag, irclickid, clickid]
 
 rubrics:
-  # mode: auto | approve. enabled=false — рубрика включается в своей фазе.
+  # mode: auto | approve. enabled=false — рубрика выключена. Таблица «Рубрики» в Notion переопределяет оба поля.
   tool:       {emoji: "🛠", hashtag: "#инструмент", title: "🛠 Инструмент", mode: auto, enabled: true, max_chars: 900, overlay: standard}
   skill_mcp:  {emoji: "🧩", hashtag: "#skill",      title: "🧩 Skill/MCP",  mode: auto, enabled: true, max_chars: 900, overlay: standard}
   trick:      {emoji: "💡", hashtag: "#приём",      title: "💡 Приём",      mode: auto, enabled: true, max_chars: 900, overlay: standard}
   case:       {emoji: "🔍", hashtag: "#кейс",       title: "🔍 Кейс",       mode: auto, enabled: true, max_chars: 900, overlay: standard}
   urgent:     {emoji: "🚨", hashtag: "#срочно",     title: "🚨 Срочно",     mode: auto, enabled: true, max_chars: 500, overlay: urgent}
-  book_video: {emoji: "📚", hashtag: "#книга",      title: "📚 Книга/видео", mode: auto, enabled: false, max_chars: 800, overlay: book_video}
-  benchmark:  {emoji: "📊", hashtag: "#бенчмарк",   title: "📊 Бенчмарк",   mode: auto, enabled: false, max_chars: 900, overlay: benchmark}
-  analysis:   {emoji: "🧠", hashtag: "#разбор",     title: "🧠 Разбор",     mode: approve, enabled: false, max_chars: 1500, overlay: analysis}
-  glossary:   {emoji: "📖", hashtag: "#словарь",    title: "📖 Слово дня",  mode: auto, enabled: false, max_chars: 700, overlay: glossary}
+  book_video: {emoji: "📚", hashtag: "#книга",      title: "📚 Книга/видео", mode: auto, enabled: true, max_chars: 800, overlay: book_video}
+  benchmark:  {emoji: "📊", hashtag: "#бенчмарк",   title: "📊 Бенчмарк",   mode: auto, enabled: true, max_chars: 900, overlay: benchmark}
+  analysis:   {emoji: "🧠", hashtag: "#разбор",     title: "🧠 Разбор",     mode: approve, enabled: true, max_chars: 1500, overlay: analysis}
+  glossary:   {emoji: "📖", hashtag: "#словарь",    title: "📖 Слово дня",  mode: auto, enabled: true, max_chars: 700, overlay: glossary}
   weekly:     {emoji: "📋", hashtag: "#итоги",      title: "📋 Итоги недели", mode: auto, enabled: true, max_chars: 1200, overlay: weekly}
+
+# Слово дня: термин публикуется только с источником, который его определяет (раздел 7).
+# Порядок: сначала термины, встретившиеся в постах за неделю и ещё не попавшие в словарь, потом — стартовый список.
+glossary:
+  telegraph_page: true          # публичная страница словаря (Telegraph); false — только таблица Glossary в Notion
+  terms:
+    - {term: "LLM", aliases: ["большая языковая модель", "large language model"], source: "https://en.wikipedia.org/wiki/Large_language_model"}
+    - {term: "Контекстное окно", aliases: ["context window", "контекст"], source: "https://en.wikipedia.org/wiki/Context_window"}
+    - {term: "Токен", aliases: ["token", "токены", "tokens"], source: "https://help.openai.com/en/articles/4936856-what-are-tokens-and-how-to-count-them"}
+    - {term: "MCP", aliases: ["Model Context Protocol"], source: "https://modelcontextprotocol.io/docs/getting-started/intro"}
+    - {term: "Skill", aliases: ["skills", "agent skills", "скилл"], source: "https://agentskills.io/home"}
+    - {term: "Агент", aliases: ["agent", "агенты", "AI-агент", "coding-агент"], source: "https://www.anthropic.com/engineering/building-effective-agents"}
+    - {term: "Промпт", aliases: ["prompt", "prompt engineering"], source: "https://en.wikipedia.org/wiki/Prompt_engineering"}
+    - {term: "RAG", aliases: ["retrieval-augmented generation"], source: "https://en.wikipedia.org/wiki/Retrieval-augmented_generation"}
+    - {term: "Fine-tuning", aliases: ["файнтюнинг", "дообучение"], source: "https://en.wikipedia.org/wiki/Fine-tuning_(deep_learning)"}
+    - {term: "Галлюцинация", aliases: ["hallucination", "галлюцинации"], source: "https://en.wikipedia.org/wiki/Hallucination_(artificial_intelligence)"}
+    - {term: "Vibe coding", aliases: ["вайбкодинг", "вайб-кодинг"], source: "https://en.wikipedia.org/wiki/Vibe_coding"}
+    - {term: "Эмбеддинг", aliases: ["embedding", "embeddings", "эмбеддинги"], source: "https://en.wikipedia.org/wiki/Word_embedding"}
+    - {term: "Субагент", aliases: ["subagent", "субагенты", "sub-agent"], source: "https://code.claude.com/docs/en/sub-agents"}
+    - {term: "Хуки", aliases: ["hooks", "hook"], source: "https://code.claude.com/docs/en/hooks"}
+    - {term: "AGENTS.md", aliases: [], source: "https://agents.md/"}
 
 # Источники. contours: в каких контурах опрашивать. official_domains — для белого списка срочных:
 # срочным может быть только материал с этих доменов и только из источника с whitelist: true.

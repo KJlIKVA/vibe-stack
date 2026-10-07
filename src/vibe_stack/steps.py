@@ -163,10 +163,10 @@ class WriteOutcome:
 
 
 def write(rt: Runtime, c: Candidate, rubric_key: str, rubric: Rubric, approved: list[str],
-          mode: str) -> WriteOutcome:
-    """Текст C + lint; при ошибках линтера — одна попытка исправить."""
+          mode: str, extra: dict[str, str] | None = None) -> WriteOutcome:
+    """Текст C + lint; при ошибках линтера — одна попытка исправить. extra — плейсхолдеры надстройки ({{термин}})."""
     meta = {"category": rubric_key, "url": c.url, "title": c.title, "mode": mode}
-    prompt = prompts.write_prompt(approved, meta, rubric.overlay, rubric.emoji, rubric.hashtag)
+    prompt = prompts.write_prompt(approved, meta, rubric.overlay, rubric.emoji, rubric.hashtag, extra)
     template = prompts.load(prompts.OVERLAY_FILES[rubric.overlay])
     # заголовок — тоже данные из интернета: числа в посте только из подтверждённых утверждений
     allowed = "\n".join(approved)

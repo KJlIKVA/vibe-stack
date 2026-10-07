@@ -1,4 +1,4 @@
-name: Сбор (раз в день, 07:00 МСК)
+name: Сбор и закреп (раз в день, 07:00 МСК)
 
 on:
   # второй запуск — страховка: если первый отменила очередь Actions; повтор за день код пропустит
@@ -31,7 +31,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || vars.VIBE_STACK_ENABLED == 'true'
     uses: ./.github/workflows/_run.yml
     with:
-      commands: "collect"
+      commands: "collect pin"
       mode: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'publish' }}
       force: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
     secrets: inherit
