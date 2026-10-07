@@ -7,7 +7,7 @@ import time
 from datetime import timedelta
 from typing import Any
 
-from . import prompts
+from . import prompts, sandbox
 from .board import BoardUnavailable
 from .config import Rubric
 from .glossary import run_glossary
@@ -174,8 +174,14 @@ def process_candidate(rt: Runtime, c: Candidate, rubrics: dict[str, Rubric]) -> 
     ))
     rt.state.mark_seen(c.keys, c.id, "queued", rt.now())
     rt.write_out(f"posts/{c.id}.html", w.html)
+    detail: dict[str, Any] = {"ref": ref}
+    try:
+        if req := sandbox.plan(rt, candidate_id=c.id, url=c.url, rubric=g.rubric, doc_text=doc.text):
+            detail["sandbox"] = req
+    except Exception as e:  # песочница — необязательная пометка, сбор из-за неё не падает
+        log.warning("песочница: заявка для %s не создана: %s", c.id, type(e).__name__)
     decision = "queued" if status == Status.APPROVED else "pending_approval"
-    rt.decision(CONTOUR, c, "board", decision, [], rubric=g.rubric, score_total=g.total, detail={"ref": ref})
+    rt.decision(CONTOUR, c, "board", decision, [], rubric=g.rubric, score_total=g.total, detail=detail)
     return decision
 
 

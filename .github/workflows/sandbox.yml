@@ -1,0 +1,150 @@
+# Песочница (фаза 3): ставит пакет находки и запускает --help, чтобы пост мог получить пометку «🧪 Запущено».
+#
+# Три job:
+#   plan — читает заявки из состояния (токен только на чтение, секретов нет);
+#   run  — запускает находки: permissions: {}, НИ ОДНОГО секрета, без checkout. Код пакета работает только
+#          в контейнере без сети, не от root, с лимитами (src/vibe_stack/sandbox_runner.py);
+#   save — записывает результаты в ветку state (токен на запись, чужой код здесь не выполняется).
+# Ручной запуск с полем test (например pypi:ruff) — проверка песочницы без записи состояния.
+name: Песочница (установка и --help находок)
+
+on:
+  workflow_run:
+    workflows: ["Сбор и закреп (раз в день, 07:00 МСК)"]
+    types: [completed]
+  schedule:
+    - cron: "20 6,9,12,15 * * *"  # страховка: заявки, которые не успели сразу после сбора
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "проверка без записи состояния: pypi:<пакет> или npm:<пакет> (пусто — обычный запуск)"
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  plan:
+    if: github.event_name == 'workflow_dispatch' || vars.VIBE_STACK_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      count: ${{ steps.export.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Зависимости
+        run: uv sync --frozen --no-dev
+
+      - name: Загрузить состояние из ветки state
+        if: inputs.test == ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/state.sh pull
+
+      - name: Заявки
+        id: export
+        env:
+          TEST: ${{ inputs.test }}
+        run: |
+          mkdir -p sandbox
+          uv run --no-sync vibe-stack sandbox-export --out-file sandbox/requests.json --test "$TEST"
+          cp src/vibe_stack/sandbox_runner.py sandbox/
+          echo "count=$(python3 -c 'import json; print(len(json.load(open("sandbox/requests.json"))))')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: sandbox-in-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sandbox/
+          retention-days: 7
+
+  run:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: sandbox-in-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sandbox/
+
+      - name: Закрыть контейнерам служебные адреса машины
+        # метаданные облака и служебный адрес Azure: контейнеру с сетью (установка) туда нельзя
+        run: |
+          set -euo pipefail
+          sudo iptables -I DOCKER-USER -d 169.254.0.0/16 -j DROP
+          sudo iptables -I DOCKER-USER -d 168.63.129.16 -j DROP
+          sudo iptables -L DOCKER-USER -n | grep -q 169.254.0.0/16
+
+      - name: Песочница
+        timeout-minutes: 35
+        run: python3 -I sandbox/sandbox_runner.py sandbox/requests.json sandbox/results.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: sandbox-out-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sandbox/results.json
+          retention-days: 7
+
+  save:
+    needs: run
+    if: needs.run.result == 'success' && inputs.test == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # все, кто пишет состояние, — строго по одному
+    concurrency:
+      group: vibe-stack-state
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Зависимости
+        run: uv sync --frozen --no-dev
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: sandbox-out-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sandbox/
+
+      - name: Записать результаты
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          scripts/state.sh pull
+          uv run --no-sync vibe-stack sandbox-apply sandbox/results.json
+          scripts/state.sh push sandbox
+
+  alert:
+    needs: [plan, run, save]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Сообщить админу в Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+          TEXT: "Vibe Stack: песочница завершилась с ошибкой (посты выйдут без пометки «Запущено»): ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$ADMIN_CHAT_ID" ]; then exit 0; fi
+          curl -sS -o /dev/null --max-time 20 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${ADMIN_CHAT_ID}" --data-urlencode "text=${TEXT}"

@@ -6,6 +6,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from . import sandbox
 from .board import BoardUnavailable
 from .lint import lint_post
 from .models import PostRecord, Status
@@ -69,6 +70,10 @@ def run_publish(rt: Runtime) -> dict[str, Any]:
 
     # срочные (Urgent) публикует срочный контур, здесь только обычная очередь
     queue = _drop_stale_and_published(rt, [p for p in queue if not p.urgent], now)
+    if waiting := [p for p in queue if sandbox.waiting(rt, p, now)]:
+        # ждём песочницу не дольше sandbox.max_wait_minutes, потом пост выйдет и без пометки
+        summary["sandbox_waiting"] = len(waiting)
+        queue = [p for p in queue if p not in waiting]
     rubrics = rt.rubrics()
     history = rt.state.published_since(today - timedelta(days=max(rt.cfg.planner.topic_repeat_days, 7) + 1))
     pick = pick_next(
@@ -153,8 +158,9 @@ def publish_post(rt: Runtime, post: PostRecord, *, slot: str | None, urgent: boo
         rt.notifier.notify(f"пост «{post.title[:80]}» не отправлен: Notion не принял статус «Отправляется»")
         return False
     ref = post.ref or f"tg-{short_id(post.source_url, post.title)}"
+    text = sandbox.with_mark(rt, post)  # «🧪 Запущено…» ставит код и только после успешного запуска
     try:
-        mid: int | None = rt.tg.send_message(rt.channel_id, post.html, preview_url=post.source_url or None)
+        mid: int | None = rt.tg.send_message(rt.channel_id, text, preview_url=post.source_url or None)
     except TelegramError as e:
         if not e.uncertain:
             _safe_update(rt, post.ref, status=Status.ERROR, reject_reason=f"Telegram: {e}"[:500], published_at=None)
@@ -169,10 +175,11 @@ def publish_post(rt: Runtime, post: PostRecord, *, slot: str | None, urgent: boo
     _record(rt, post, ref, mid, now, slot=slot, urgent=urgent, counts_regular=counts_regular)
     if mid is None:
         return False
-    updated = _safe_update(rt, post.ref, status=Status.PUBLISHED, tg_message_id=mid, published_at=now)
+    extra = {"html": text} if text != post.html else {}
+    updated = _safe_update(rt, post.ref, status=Status.PUBLISHED, tg_message_id=mid, published_at=now, **extra)
     if post.ref and not updated:
         rt.notifier.notify(f"пост «{post.title[:80]}» вышел (id {mid}), но статус в Notion остался «Отправляется»")
-    rt.write_out(f"published/{mid}.html", post.html)
+    rt.write_out(f"published/{mid}.html", text)
     log.info("опубликовано: %s (message_id=%s)", post.title, mid)
     if post.rubric == "glossary":
         from .glossary import on_published

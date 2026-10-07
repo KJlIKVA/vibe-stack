@@ -88,6 +88,20 @@ CREATE TABLE IF NOT EXISTS glossary (
     published_at TEXT NOT NULL,
     post_url TEXT
 );
+CREATE TABLE IF NOT EXISTS sandbox (
+    candidate_id TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    ecosystem TEXT NOT NULL,
+    package TEXT NOT NULL,
+    version TEXT NOT NULL,
+    bins TEXT NOT NULL,            -- JSON: имена команд из реестра (npm); для PyPI — пусто, ищутся после установки
+    status TEXT NOT NULL,          -- pending | ok | failed
+    requested_at TEXT NOT NULL,
+    finished_at TEXT,
+    stage TEXT,                    -- на чём остановились: install | discover | run
+    command TEXT,                  -- что именно запускалось, например «ruff --help»
+    detail TEXT                    -- хвост вывода (недоверенный текст: только для лога, не в посты и не в LLM)
+);
 CREATE INDEX IF NOT EXISTS idx_candidates_date ON candidates(local_date);
 CREATE INDEX IF NOT EXISTS idx_published_date ON published(local_date);
 CREATE INDEX IF NOT EXISTS idx_llm_date ON llm_calls(local_date);
@@ -237,6 +251,11 @@ class State:
         )
         self.db.commit()
 
+    def runs_since(self, contour: str, since: datetime) -> list[sqlite3.Row]:
+        return self.db.execute(
+            "SELECT * FROM runs WHERE contour=? AND started_at >= ? ORDER BY started_at", (contour, iso(since))
+        ).fetchall()
+
     def finish_run(self, run_id: str, status: str, summary: dict[str, Any], now: datetime) -> None:
         self.db.execute(
             "UPDATE runs SET finished_at=?, status=?, summary=? WHERE id=?",
@@ -269,6 +288,39 @@ class State:
 
     def llm_calls_in_run(self, run_id: str) -> int:
         return self.db.execute("SELECT COUNT(*) FROM llm_calls WHERE run_id=?", (run_id,)).fetchone()[0]
+
+    # --- песочница ---------------------------------------------------------------------------
+    def add_sandbox_request(self, *, candidate_id: str, repo: str, ecosystem: str, package: str, version: str,
+                            bins: list[str], now: datetime) -> None:
+        self.db.execute(
+            "INSERT OR IGNORE INTO sandbox(candidate_id, repo, ecosystem, package, version, bins, status, "
+            "requested_at) VALUES (?,?,?,?,?,?,'pending',?)",
+            (candidate_id, repo, ecosystem, package, version, json.dumps(bins), iso(now)),
+        )
+        self.db.commit()
+
+    def sandbox_row(self, candidate_id: str | None) -> sqlite3.Row | None:
+        if not candidate_id:
+            return None
+        return self.db.execute("SELECT * FROM sandbox WHERE candidate_id=?", (candidate_id,)).fetchone()
+
+    def sandbox_pending(self, limit: int) -> list[sqlite3.Row]:
+        return self.db.execute(
+            "SELECT * FROM sandbox WHERE status='pending' ORDER BY requested_at LIMIT ?", (limit,)
+        ).fetchall()
+
+    def finish_sandbox(self, candidate_id: str, *, ok: bool, stage: str, command: str, detail: str,
+                       now: datetime) -> bool:
+        cur = self.db.execute(
+            "UPDATE sandbox SET status=?, stage=?, command=?, detail=?, finished_at=? "
+            "WHERE candidate_id=? AND status='pending'",
+            ("ok" if ok else "failed", stage, command, detail, iso(now), candidate_id),
+        )
+        self.db.commit()
+        return cur.rowcount == 1
+
+    def sandbox_since(self, since: datetime) -> list[sqlite3.Row]:
+        return self.db.execute("SELECT * FROM sandbox WHERE finished_at >= ?", (iso(since),)).fetchall()
 
     # --- словарь ---------------------------------------------------------------------------
     def add_glossary(self, *, term: str, source_url: str, definition: str, published_at: datetime,

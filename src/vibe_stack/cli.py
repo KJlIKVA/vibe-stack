@@ -23,13 +23,14 @@ from .fetch import HttpFetcher
 from .llm import LLM, NoLLM, OpenAILLM
 from .logs import setup_logging
 from .runtime import Runtime
+from .sandbox import Registry
 from .sources import build_source
 from .storage import State
 from .telegram import DryRunTelegram, Notifier, Telegram
 from .timeutil import local_date, parse_dt, utc_now
 
 log = logging.getLogger("vibe_stack")
-CONTOURS = ("collect", "publish", "urgent", "weekly", "pin", "glossary")
+CONTOURS = ("collect", "publish", "urgent", "weekly", "pin", "glossary", "digest")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -58,6 +59,11 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("notion-setup", help="создать базы Notion под NOTION_ROOT_PAGE_ID")
     sub.add_parser("telegraph-setup", help="один раз создать страницу словаря на Telegraph (токен — в .env)")
     sub.add_parser("status", help="счётчики за сегодня и расходы")
+    se = sub.add_parser("sandbox-export", help="заявки песочницы в JSON (для job без секретов)")
+    se.add_argument("--out-file", required=True)
+    se.add_argument("--test", default="", help="проверочная заявка без состояния: pypi:<пакет> или npm:<пакет>")
+    sa = sub.add_parser("sandbox-apply", help="записать результаты песочницы в состояние")
+    sa.add_argument("results")
     return p
 
 
@@ -74,6 +80,10 @@ def main(argv: list[str] | None = None) -> None:
             code = notion_setup(cfg)
         elif args.command == "telegraph-setup":
             code = telegraph_setup(cfg)
+        elif args.command == "sandbox-export":
+            code = sandbox_export(args, cfg)
+        elif args.command == "sandbox-apply":
+            code = sandbox_apply(args)
         else:
             code = status(args, cfg)
     except MissingSecret as e:
@@ -157,7 +167,7 @@ def build_runtime(args: argparse.Namespace, cfg: Config, contour: str) -> Runtim
     rt = Runtime(
         cfg=cfg, state=state, board=board, tg=tg, notifier=notifier, llm=llm,
         fetcher=HttpFetcher(cfg.fetch, clock), clock=clock, run_id=run_id, out_dir=out_dir, mode=mode,
-        channel_id=channel, force=bool(args.force), glossary_page=glossary_page,
+        channel_id=channel, force=bool(args.force), glossary_page=glossary_page, registry=Registry(http),
         sources_factory=lambda chosen: [build_source(s, http, clock, cfg.gate.max_age_days) for s in chosen],
     )
     state.start_run(run_id, contour, mode, clock())
@@ -166,6 +176,7 @@ def build_runtime(args: argparse.Namespace, cfg: Config, contour: str) -> Runtim
 
 def run_contour(args: argparse.Namespace, cfg: Config) -> int:
     from .collect import run_collect
+    from .digest import run_digest
     from .glossary import run_glossary
     from .leaderboards import build_adapters
     from .pin import run_pin
@@ -176,7 +187,7 @@ def run_contour(args: argparse.Namespace, cfg: Config) -> int:
     rt = build_runtime(args, cfg, args.command)
     fn = {
         "collect": run_collect, "publish": run_publish, "urgent": run_urgent, "weekly": run_weekly,
-        "pin": lambda r: run_pin(r, build_adapters(cfg)), "glossary": run_glossary,
+        "pin": lambda r: run_pin(r, build_adapters(cfg)), "glossary": run_glossary, "digest": run_digest,
     }[args.command]
     status_ = "ok"
     try:
@@ -230,6 +241,37 @@ def run_eval(args: argparse.Namespace, cfg: Config) -> int:
             print(f"       ↳ {m}")
     print(f"\nитого: {len(fixtures) - failed}/{len(fixtures)} совпали; подробности в {out_root}")
     return 1 if failed else 0
+
+
+# --- песочница ---------------------------------------------------------------------------
+
+def sandbox_export(args: argparse.Namespace, cfg: Config) -> int:
+    from .sandbox import export_requests, manual_request
+
+    setup_logging(None)
+    if args.test:
+        http = httpx.Client(timeout=cfg.fetch.timeout_s, headers={"User-Agent": cfg.fetch.user_agent})
+        requests = manual_request(Registry(http), args.test)
+    else:
+        state = State(args.state)
+        requests = export_requests(state, cfg.sandbox.max_requests_per_run)
+        state.close()
+    out = Path(args.out_file)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(requests, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"заявок в песочницу: {len(requests)}")
+    return 0
+
+
+def sandbox_apply(args: argparse.Namespace) -> int:
+    from .sandbox import apply_results
+
+    setup_logging(None)
+    state = State(args.state)
+    counts = apply_results(state, Path(args.results), utc_now())
+    state.close()
+    print(f"песочница: запущено {counts['ok']}, не запустилось {counts['failed']}, пропущено {counts['ignored']}")
+    return 0
 
 
 # --- служебные ---------------------------------------------------------------------------

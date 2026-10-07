@@ -1,0 +1,35 @@
+name: Сводка дня админу (23:45 МСК)
+
+on:
+  # второй запуск — страховка, если первый отменила очередь Actions; повтор за день код пропустит
+  schedule:
+    - cron: "45 20 * * *"
+    - cron: "55 20 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run — только в лог; publish — отправить админу"
+        type: choice
+        options: [dry-run, publish]
+        default: dry-run
+      force:
+        description: "отправить, даже если сводка за сегодня уже была"
+        type: boolean
+        default: false
+
+concurrency:
+  group: vibe-stack-state
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # нужно только job save в _run.yml
+
+jobs:
+  run:
+    if: github.event_name == 'workflow_dispatch' || vars.VIBE_STACK_ENABLED == 'true'
+    uses: ./.github/workflows/_run.yml
+    with:
+      commands: "digest"
+      mode: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'publish' }}
+      force: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+    secrets: inherit

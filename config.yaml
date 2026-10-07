@@ -133,6 +133,21 @@ leaderboards:
 
 # Источники. contours: в каких контурах опрашивать. official_domains — для белого списка срочных:
 # срочным может быть только материал с этих доменов и только из источника с whitelist: true.
+# Песочница (фаза 3): пакет находки ставится и запускается с --help в изолированном контейнере GitHub Actions
+# (.github/workflows/sandbox.yml). Пакет берётся из команды установки в README и принимается, только если
+# реестр (PyPI/npm) ссылается на тот же репозиторий GitHub. Если запуск прошёл — код добавляет в пост
+# «🧪 Запущено в песочнице»; если нет — пост выходит как обычно.
+sandbox:
+  enabled: true
+  rubrics: [tool, skill_mcp]
+  ecosystems: [pypi, npm]
+  max_wait_minutes: 120       # столько публикация ждёт результата, потом пост выходит без пометки
+  max_requests_per_run: 10
+
+# Сводка дня админу в личку (время — cron в .github/workflows/digest.yml, 23:45 МСК)
+digest:
+  enabled: true
+
 sources:
   - name: openai-news
     type: rss

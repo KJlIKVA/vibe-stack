@@ -43,6 +43,7 @@ class Runtime:
     fixture_candidates: list[Candidate] | None = None
     force: bool = False  # --force: пропустить защиту «уже запускался сегодня/на этой неделе»
     glossary_page: Any = None  # публичная страница словаря (Telegraph) или None
+    registry: Any = None  # проверка пакетов в PyPI/npm для песочницы (sandbox.Registry) или None
     _settings: BoardSettings | None = field(default=None, repr=False)
 
     # --- настройки с учётом доски ---------------------------------------------------------------------------

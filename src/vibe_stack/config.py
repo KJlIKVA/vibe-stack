@@ -169,6 +169,20 @@ class SourceConfig(BaseModel):
     skip_title_regex: list[str] = Field(default_factory=list)
 
 
+class SandboxConfig(BaseModel):
+    """Песочница (фаза 3): установка пакета находки и запуск --help в изолированном контейнере GitHub Actions."""
+
+    enabled: bool = True
+    rubrics: list[str] = Field(default_factory=lambda: ["tool", "skill_mcp"])
+    ecosystems: list[str] = Field(default_factory=lambda: ["pypi", "npm"])
+    max_wait_minutes: int = 120  # столько публикация ждёт результата, потом пост выходит без пометки
+    max_requests_per_run: int = 10
+
+
+class DigestConfig(BaseModel):
+    enabled: bool = True  # сводка дня админу (время — cron в .github/workflows/digest.yml)
+
+
 class Config(BaseModel):
     channel: ChannelConfig = Field(default_factory=ChannelConfig)
     llm: LLMConfig
@@ -185,6 +199,8 @@ class Config(BaseModel):
     glossary: GlossaryConfig = Field(default_factory=GlossaryConfig)
     leaderboards: list[LeaderboardConfig] = Field(default_factory=list)
     sources: list[SourceConfig] = Field(default_factory=list)
+    sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
+    digest: DigestConfig = Field(default_factory=DigestConfig)
 
     def rubric(self, key: str) -> Rubric:
         return self.rubrics[key]
