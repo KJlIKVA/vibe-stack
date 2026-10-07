@@ -1,0 +1,133 @@
+# Общий запуск контуров. Вызывается из collect.yml, tick.yml, weekly.yml.
+#
+# Три job:
+#   run   — контуры. Токен GitHub только на чтение: этот процесс обрабатывает недоверенный контент из интернета.
+#   save  — сохраняет состояние в ветку state (здесь токен на запись, но чужой контент не обрабатывается).
+#   alert — сообщение админу в Telegram, если что-то упало.
+name: _run
+
+on:
+  workflow_call:
+    inputs:
+      commands:
+        description: "контуры через пробел, по порядку (например: urgent publish)"
+        type: string
+        required: true
+      mode:
+        description: "publish или dry-run"
+        type: string
+        default: publish
+      force:
+        description: "запустить, даже если сбор/итоги за период уже были"
+        type: boolean
+        default: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Зависимости
+        run: uv sync --frozen --no-dev
+
+      - name: Загрузить состояние из ветки state
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/state.sh pull
+
+      - name: Контуры
+        timeout-minutes: 35
+        env:
+          COMMANDS: ${{ inputs.commands }}
+          MODE: ${{ inputs.mode }}
+          FORCE: ${{ inputs.force && '--force' || '' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_ROOT_PAGE_ID: ${{ secrets.NOTION_ROOT_PAGE_ID }}
+          # только чтение (permissions выше) — для лимитов GitHub API при сборе
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          status=0
+          for c in $COMMANDS; do
+            case "$c" in collect|publish|urgent|weekly) ;; *) echo "неизвестный контур $c"; exit 2;; esac
+            uv run --no-sync vibe-stack "$c" "--$MODE" $FORCE || status=1
+          done
+          exit $status
+
+      - name: Передать состояние в job save
+        # без отметки об успешном pull job save откажется сохранять (scripts/state.sh)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: state/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Логи запуска
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  save:
+    needs: run
+    # и после ошибки контура: лимиты и «просмотренное» должны сохраниться. В dry-run в БД меняются
+    # только расходы на модель — их тоже нужно сохранить для дневного бюджета.
+    if: always() && needs.run.result != 'skipped' && needs.run.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Получить состояние из job run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: state/
+
+      - name: Сохранить состояние в ветку state
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMANDS: ${{ inputs.commands }}
+        run: scripts/state.sh push "$COMMANDS"
+
+  alert:
+    needs: [run, save]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Сообщить админу в Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+          TEXT: "Vibe Stack: workflow «${{ github.workflow }}» (${{ inputs.commands }}) завершился с ошибкой: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$ADMIN_CHAT_ID" ]; then
+            echo "Telegram не настроен — оповещение только письмом GitHub"; exit 0
+          fi
+          curl -sS -o /dev/null --max-time 20 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${ADMIN_CHAT_ID}" --data-urlencode "text=${TEXT}"

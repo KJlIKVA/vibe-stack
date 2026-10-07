@@ -1,0 +1,19 @@
+id: "11"
+description: Тот же «срочный» пост со стороннего сайта без официальной ссылки → не срочный
+scenario: urgent
+expected:
+  decision: not_urgent
+  stage: whitelist
+  reasons_include: [not_official_source]
+  sent: 0
+candidates:
+  - source: openai-news
+    source_type: rss
+    url: https://ai-news-digest.example.org/openai-releases-fixturemodel-1
+    title: OpenAI releases FixtureModel-1
+    published_hours_ago: 1
+    whitelist: true
+    official_domains: [openai.com]
+    document:
+      text: |
+        Insiders say OpenAI just dropped FixtureModel-1 and it changes everything.

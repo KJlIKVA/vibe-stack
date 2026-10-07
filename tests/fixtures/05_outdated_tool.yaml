@@ -1,0 +1,14 @@
+id: "05"
+description: Инструмент двухлетней давности без обновлений → отклонено outdated
+scenario: collect
+expected:
+  decision: rejected
+  stage: prefilter
+  reasons_include: [outdated]
+candidates:
+  - source: hackernews
+    source_type: hackernews
+    url: https://github.com/old-corp/gpt-commit-msg
+    title: old-corp/gpt-commit-msg
+    published_days_ago: 760
+    updated_days_ago: 700

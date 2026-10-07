@@ -1,0 +1,201 @@
+"""Загрузка config.yaml и секретов из окружения.
+
+Модели, лимиты, пороги и расписание живут в config.yaml; секреты — только в переменных окружения.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from pydantic import BaseModel, Field, field_validator
+
+SECRET_ENV_NAMES = (
+    "OPENAI_API_KEY",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHANNEL_ID",
+    "ADMIN_CHAT_ID",
+    "NOTION_TOKEN",
+    "NOTION_ROOT_PAGE_ID",
+    "GITHUB_TOKEN",
+)
+
+
+class StepConfig(BaseModel):
+    model: str
+    effort: str = "medium"
+    max_output_tokens: int = 8000
+
+
+class Price(BaseModel):
+    input: float
+    output: float
+    cached_input: float | None = None
+
+
+class LLMConfig(BaseModel):
+    provider: Literal["openai"] = "openai"
+    base_url: str | None = None
+    max_calls_per_run: int = 60
+    daily_budget_usd: float = 3.0
+    request_timeout_s: float = 180
+    max_attempts: int = 2  # попытки на один вызов; каждая учитывается в лимите и бюджете
+    prices_per_1m: dict[str, Price] = Field(default_factory=dict)
+    steps: dict[str, StepConfig]
+
+
+class ChannelConfig(BaseModel):
+    name: str = "Vibe Stack"
+    tz: str = "Europe/Moscow"
+    username: str = ""
+
+
+class Limits(BaseModel):
+    regular_per_day: int = 3
+    urgent_per_day: int = 2
+
+
+class Gate(BaseModel):
+    min_total: int = 10
+    min_verifiability: int = 2
+    max_age_days: int = 30
+    min_approved_claims: int = 2
+
+
+class Schedule(BaseModel):
+    publish_slots: list[str] = Field(default_factory=lambda: ["10:00", "14:00", "18:00"])
+    slot_window_minutes: int = 120
+    queue_max_age_days: int = 5
+
+    @field_validator("publish_slots")
+    @classmethod
+    def _check_slots(cls, v: list[str]) -> list[str]:
+        for s in v:
+            hh, mm = s.split(":")
+            if not (0 <= int(hh) < 24 and 0 <= int(mm) < 60):
+                raise ValueError(f"bad slot {s}")
+        return sorted(v)
+
+
+class Planner(BaseModel):
+    topic_repeat_days: int = 7
+    topic_similarity: float = 0.5
+    max_per_domain_per_day: int = 1
+    weekly_min: dict[str, int] = Field(default_factory=dict)
+    weekly_max: dict[str, int] = Field(default_factory=dict)
+
+
+class Collect(BaseModel):
+    max_candidates_to_score: int = 25
+    max_per_source: int = 8
+    max_minutes: float = 20  # дедлайн сбора: job в Actions не должен убиваться посреди записи
+    code_injection_guard: bool = True
+
+
+class Urgent(BaseModel):
+    max_item_age_hours: int = 24
+    events: list[str] = Field(default_factory=list)
+
+
+class Fetch(BaseModel):
+    timeout_s: float = 20
+    max_bytes: int = 3_000_000
+    max_doc_chars: int = 24_000
+    user_agent: str = "VibeStackBot/0.1"
+
+
+class Dedup(BaseModel):
+    seen_ttl_days: int = 60
+
+
+class Prefilter(BaseModel):
+    blocked_domains: list[str] = Field(default_factory=list)
+    pirate_domains: list[str] = Field(default_factory=list)
+    affiliate_params: list[str] = Field(default_factory=list)
+
+
+class Rubric(BaseModel):
+    emoji: str
+    hashtag: str
+    title: str
+    mode: Literal["auto", "approve"] = "auto"
+    enabled: bool = True
+    max_chars: int = 900
+    overlay: str = "standard"
+
+
+class SourceConfig(BaseModel):
+    name: str
+    type: Literal["rss", "github_releases", "github_search", "hackernews", "sitemap", "fixture"]
+    url: str | None = None
+    repo: str | None = None
+    path_prefix: str | None = None
+    whitelist: bool = False
+    official_domains: list[str] = Field(default_factory=list)
+    contours: list[str] = Field(default_factory=lambda: ["collect"])
+    enabled: bool = True
+    queries: list[str] = Field(default_factory=list)
+    per_query: int = 10
+    min_stars: int = 0
+    min_points: int = 0
+    skip_title_regex: list[str] = Field(default_factory=list)
+
+
+class Config(BaseModel):
+    channel: ChannelConfig = Field(default_factory=ChannelConfig)
+    llm: LLMConfig
+    limits: Limits = Field(default_factory=Limits)
+    gate: Gate = Field(default_factory=Gate)
+    schedule: Schedule = Field(default_factory=Schedule)
+    planner: Planner = Field(default_factory=Planner)
+    collect: Collect = Field(default_factory=Collect)
+    urgent: Urgent = Field(default_factory=Urgent)
+    fetch: Fetch = Field(default_factory=Fetch)
+    dedup: Dedup = Field(default_factory=Dedup)
+    prefilter: Prefilter = Field(default_factory=Prefilter)
+    rubrics: dict[str, Rubric]
+    sources: list[SourceConfig] = Field(default_factory=list)
+
+    def rubric(self, key: str) -> Rubric:
+        return self.rubrics[key]
+
+
+def load_config(path: str | Path = "config.yaml") -> Config:
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    return Config.model_validate(data)
+
+
+def load_dotenv(path: str | Path = ".env") -> None:
+    """Минимальный загрузчик .env для локального запуска: не перетирает уже заданные переменные."""
+    p = Path(path)
+    if not p.exists():
+        return
+    for raw in p.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def env(name: str, required: bool = False) -> str | None:
+    value = os.environ.get(name) or None
+    if required and not value:
+        raise MissingSecret(name)
+    return value
+
+
+def secret_values() -> list[str]:
+    """Значения секретов — чтобы вычищать их из логов."""
+    return [v for n in SECRET_ENV_NAMES if (v := os.environ.get(n)) and len(v) >= 6]
+
+
+class MissingSecret(RuntimeError):
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Не задана переменная окружения {name}")
+        self.name = name

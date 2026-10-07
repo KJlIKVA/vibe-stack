@@ -1,0 +1,23 @@
+id: "06"
+description: Лендинг платного продукта с партнёркой → отклонено ad
+scenario: collect
+expected:
+  decision: rejected
+  stage: prefilter
+  reasons_include: [ad]
+candidates:
+  - source: hackernews
+    source_type: hackernews
+    url: https://supercoder-ai.example.com/pricing?ref=partner42
+    title: SuperCoder AI — пиши код в 10 раз быстрее
+    published_days_ago: 2
+    document:
+      text: |
+        SuperCoder AI. Пиши код в 10 раз быстрее! Скидка 50% по партнёрской ссылке. Тариф Pro — $49/месяц.
+    llm:
+      score:
+        category: tool
+        scores: {novelty: 2, usefulness: 1, verifiability: 1, substance: 0, audience_fit: 1}
+        hard_stops: [ad]
+        reason: Рекламный лендинг с партнёрской ссылкой
+        claims: []

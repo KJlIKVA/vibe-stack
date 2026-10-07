@@ -1,0 +1,159 @@
+# Vibe Stack — конфигурация пайплайна.
+# Секреты здесь не хранятся: только переменные окружения (см. .env.example).
+# Notion (таблицы «Рубрики», «Источники», «Настройки») может переопределять часть значений во время работы.
+
+channel:
+  name: Vibe Stack
+  tz: Europe/Moscow
+  # @username канала без «@» — нужен для ссылок на посты в «Итогах недели».
+  # Пусто — ссылки строятся по TELEGRAM_CHANNEL_ID (вид t.me/c/...).
+  username: ""
+
+llm:
+  provider: openai
+  base_url: null              # null = https://api.openai.com/v1
+  max_calls_per_run: 60       # MAX_LLM_CALLS_PER_RUN
+  daily_budget_usd: 3.0       # дневной бюджет на все контуры вместе
+  request_timeout_s: 180
+  max_attempts: 2             # попыток на вызов (таймаут, 5xx, 429); каждая — в лимите и бюджете
+  # Цены за 1M токенов (USD), контекст до 272K — для подсчёта бюджета (сверено 2026-10-07).
+  # Если cached_input не задан, кэш считается по цене input (с запасом).
+  # Модель без цены здесь — запуск откажется её вызывать, чтобы бюджет не считался «бесплатным».
+  prices_per_1m:
+    gpt-5.6-terra: {input: 2.50, cached_input: 0.25, output: 15.00}
+    gpt-5.6-luna: {input: 1.00, output: 6.00}
+    gpt-5.6-sol: {input: 5.00, output: 30.00}
+  # Модели и effort по шагам. Имена моделей — только здесь.
+  # max_output_tokens включает токены рассуждения.
+  steps:
+    score:   {model: gpt-5.6-terra, effort: low,    max_output_tokens: 6000}    # промпт A
+    verify:  {model: gpt-5.6-terra, effort: medium, max_output_tokens: 12000}   # промпт B
+    write:   {model: gpt-5.6-terra, effort: medium, max_output_tokens: 8000}    # промпт C
+    triage:  {model: gpt-5.6-terra, effort: low,    max_output_tokens: 6000}    # промпт U (срочное)
+    weekly:  {model: gpt-5.6-terra, effort: medium, max_output_tokens: 8000}    # промпт D
+
+limits:
+  regular_per_day: 3
+  urgent_per_day: 2
+
+gate:
+  min_total: 10               # из 15
+  min_verifiability: 2
+  max_age_days: 30            # старше — hard stop outdated (по дате создания/обновления)
+  min_approved_claims: 2
+
+schedule:
+  publish_slots: ["10:00", "14:00", "18:00"]   # в channel.tz
+  slot_window_minutes: 120    # слот считается активным столько минут после своего времени
+  queue_max_age_days: 5       # одобренный, но не вышедший пост старше этого устаревает
+
+planner:
+  topic_repeat_days: 7
+  topic_similarity: 0.5       # порог сходства заголовков (Jaccard по словам)
+  max_per_domain_per_day: 1
+  weekly_min: {glossary: 1, analysis: 1}
+  weekly_max: {book_video: 2}
+
+collect:
+  max_candidates_to_score: 25 # сколько кандидатов за запуск идут в LLM
+  max_per_source: 8           # не больше стольких от одного источника за запуск (источники идут по очереди)
+  max_minutes: 20             # дедлайн сбора; оставшиеся кандидаты ждут следующего дня
+  code_injection_guard: true  # код сам ставит injection_detected по явным фразам, не дожидаясь LLM
+
+urgent:
+  max_item_age_hours: 24
+  events: [new_model, major_release, pricing_or_limits_change, vulnerability]
+
+fetch:
+  timeout_s: 20
+  max_bytes: 3000000
+  max_doc_chars: 24000
+  user_agent: "VibeStackBot/0.1 (+https://github.com/KJlIKVA/vibe-stack)"
+
+dedup:
+  seen_ttl_days: 60           # отклонённое не пересматриваем столько дней; опубликованное — никогда
+
+prefilter:
+  blocked_domains: [medium.com/tag, linkedin.com, facebook.com, x.com, twitter.com, youtube.com/shorts]
+  pirate_domains: [libgen.is, libgen.rs, libgen.li, z-lib.org, z-library.sk, annas-archive.org, annas-archive.se, sci-hub.se, pdfdrive.com]
+  affiliate_params: [ref, aff, affid, aff_id, affiliate, affiliate_id, via, partner, partner_id, tag, irclickid, clickid]
+
+rubrics:
+  # mode: auto | approve. enabled=false — рубрика включается в своей фазе.
+  tool:       {emoji: "🛠", hashtag: "#инструмент", title: "🛠 Инструмент", mode: auto, enabled: true, max_chars: 900, overlay: standard}
+  skill_mcp:  {emoji: "🧩", hashtag: "#skill",      title: "🧩 Skill/MCP",  mode: auto, enabled: true, max_chars: 900, overlay: standard}
+  trick:      {emoji: "💡", hashtag: "#приём",      title: "💡 Приём",      mode: auto, enabled: true, max_chars: 900, overlay: standard}
+  case:       {emoji: "🔍", hashtag: "#кейс",       title: "🔍 Кейс",       mode: auto, enabled: true, max_chars: 900, overlay: standard}
+  urgent:     {emoji: "🚨", hashtag: "#срочно",     title: "🚨 Срочно",     mode: auto, enabled: true, max_chars: 500, overlay: urgent}
+  book_video: {emoji: "📚", hashtag: "#книга",      title: "📚 Книга/видео", mode: auto, enabled: false, max_chars: 800, overlay: book_video}
+  benchmark:  {emoji: "📊", hashtag: "#бенчмарк",   title: "📊 Бенчмарк",   mode: auto, enabled: false, max_chars: 900, overlay: benchmark}
+  analysis:   {emoji: "🧠", hashtag: "#разбор",     title: "🧠 Разбор",     mode: approve, enabled: false, max_chars: 1500, overlay: analysis}
+  glossary:   {emoji: "📖", hashtag: "#словарь",    title: "📖 Слово дня",  mode: auto, enabled: false, max_chars: 700, overlay: glossary}
+  weekly:     {emoji: "📋", hashtag: "#итоги",      title: "📋 Итоги недели", mode: auto, enabled: true, max_chars: 1200, overlay: weekly}
+
+# Источники. contours: в каких контурах опрашивать. official_domains — для белого списка срочных:
+# срочным может быть только материал с этих доменов и только из источника с whitelist: true.
+sources:
+  - name: openai-news
+    type: rss
+    url: https://openai.com/news/rss.xml
+    whitelist: true
+    official_domains: [openai.com]
+    contours: [collect, urgent]
+  - name: anthropic-news
+    type: sitemap
+    url: https://www.anthropic.com/sitemap.xml
+    path_prefix: /news/
+    whitelist: true
+    official_domains: [anthropic.com]
+    contours: [collect, urgent]
+    # RSS у Anthropic нет. Новая страница в /news/ = кандидат; заголовок и дату публикации код берёт со страницы
+  - name: google-deepmind-blog
+    type: rss
+    url: https://deepmind.google/blog/rss.xml
+    whitelist: true
+    official_domains: [deepmind.google, blog.google]
+    contours: [collect, urgent]
+  - name: github-changelog
+    type: rss
+    url: https://github.blog/changelog/feed/
+    whitelist: true
+    official_domains: [github.blog]
+    contours: [collect, urgent]
+  - name: claude-code-releases
+    type: github_releases
+    repo: anthropics/claude-code
+    whitelist: true
+    official_domains: [github.com]
+    contours: [collect, urgent]
+  - name: codex-releases
+    type: github_releases
+    repo: openai/codex
+    whitelist: true
+    official_domains: [github.com]
+    contours: [collect, urgent]
+  - name: simon-willison
+    type: rss
+    url: https://simonwillison.net/atom/everything/
+    whitelist: false
+    contours: [collect]
+    skip_title_regex: ["^Quoting "]   # короткие цитаты без собственного содержания
+  - name: github-search
+    type: github_search
+    contours: [collect]
+    per_query: 10
+    min_stars: 25
+    queries:
+      - "topic:mcp-server"
+      - "topic:model-context-protocol"
+      - "topic:claude-code"
+      - "topic:agent-skills"
+      - "topic:claude-skills"
+      - "topic:codex-cli"
+      - "topic:ai-agents topic:developer-tools"
+  - name: hackernews
+    type: hackernews
+    contours: [collect]
+    min_points: 60
+    per_query: 15
+    queries: ["Claude Code", "Codex", "MCP server", "AI agent", "vibe coding", "LLM coding"]

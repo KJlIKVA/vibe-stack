@@ -1,0 +1,53 @@
+id: "10"
+description: Пост в блоге официального источника о выпуске новой модели → 🚨 сразу, B обязательна, лимит обычных не тратится
+scenario: urgent
+expected:
+  decision: published
+  rubric: urgent
+  sent: 1
+  board_statuses: ["Опубликовано"]
+  summary:
+    summary.published: 1
+candidates:
+  -
+    source: openai-news
+    source_type: rss
+    url: https://openai.com/index/introducing-fixturemodel-1
+    title: Introducing FixtureModel-1
+    summary: Our new model for coding agents is available today in the API.
+    published_hours_ago: 2
+    whitelist: true
+    official_domains: [openai.com]
+    document:
+      text: |
+        Introducing FixtureModel-1
+        October 7, 2026 — Product
+
+        Today OpenAI is releasing FixtureModel-1, a new model for coding agents.
+        FixtureModel-1 is available today in the API for all developers.
+        Pricing: $2 per million input tokens and $8 per million output tokens.
+        (Тестовая фикстура: модель вымышленная.)
+    llm:
+      triage:
+        event: new_model
+        hard_stops: []
+        reason: Официальный анонс доступности новой модели в API
+        claims:
+          - "OpenAI 7 октября 2026 года выпустила модель FixtureModel-1 для coding-агентов."
+          - "FixtureModel-1 доступна в API для всех разработчиков с сегодняшнего дня."
+          - "Цена: $2 за миллион входных токенов и $8 за миллион выходных."
+      verify:
+        verdict: pass
+        fail_reason: ""
+        checks:
+          - {claim: "OpenAI 7 октября 2026 года выпустила модель FixtureModel-1 для coding-агентов.", status: supported, evidence: "первый абзац и дата публикации"}
+          - {claim: "FixtureModel-1 доступна в API для всех разработчиков с сегодняшнего дня.", status: supported, evidence: "второй абзац"}
+          - {claim: "Цена: $2 за миллион входных токенов и $8 за миллион выходных.", status: supported, evidence: "строка Pricing"}
+        approved_claims: []
+      write: |
+        🚨 <b>OpenAI выпустила модель FixtureModel-1 для coding-агентов</b>
+
+        <b>Что это значит для вайбкодера:</b> модель уже доступна в API всем разработчикам; цена — $2 за миллион входных и $8 за миллион выходных токенов.
+        <b>Что делать:</b> ничего срочного, просто знайте.
+
+        <a href="https://openai.com/index/introducing-fixturemodel-1">Официальный источник</a> · #срочно

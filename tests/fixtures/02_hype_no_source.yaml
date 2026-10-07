@@ -1,0 +1,29 @@
+id: "02"
+description: Статья «ИИ изменит всё в кодинге» без ссылок на проекты → отклонено no_primary_source
+scenario: collect
+expected:
+  decision: rejected
+  stage: gate
+  reasons_include: [no_primary_source]
+  board_statuses: ["Отклонено"]
+candidates:
+  - source: some-blog
+    source_type: rss
+    url: https://future-of-code.example.net/ai-will-change-everything
+    title: ИИ изменит всё в кодинге
+    published_days_ago: 1
+    document:
+      text: |
+        ИИ изменит всё в кодинге
+
+        Мы стоим на пороге революции. Уже очень скоро программисты перестанут писать код руками:
+        искусственный интеллект будет делать всё сам. Компании, которые не успеют перестроиться,
+        исчезнут. Эксперты уверены, что через пару лет профессия изменится до неузнаваемости.
+        Будущее уже наступило — главное не опоздать.
+    llm:
+      score:
+        category: none
+        scores: {novelty: 1, usefulness: 0, verifiability: 0, substance: 0, audience_fit: 1}
+        hard_stops: [no_primary_source]
+        reason: Общие рассуждения без ссылок на проекты, исследования или данные
+        claims: []

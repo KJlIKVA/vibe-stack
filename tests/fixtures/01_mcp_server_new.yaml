@@ -1,0 +1,78 @@
+id: "01"
+description: Новый MCP-сервер, README с описанием и установкой, релиз 5 дней назад → публикуется (🧩)
+scenario: collect
+expected:
+  decision: queued
+  rubric: skill_mcp
+  board_statuses: ["Одобрено"]
+candidates:
+  - source: github-search
+    source_type: github_search
+    url: https://github.com/acme-labs/mcp-postgres-inspector
+    title: acme-labs/mcp-postgres-inspector
+    summary: Read-only MCP server that lets AI agents inspect PostgreSQL schemas
+    published_days_ago: 12
+    updated_days_ago: 5
+    signal: 2.6
+    extra: {stars: 420, topics: [mcp, mcp-server, postgresql]}
+    document:
+      text: |
+        [репозиторий GitHub] acme-labs/mcp-postgres-inspector
+        Описание: Read-only MCP server that lets AI agents inspect PostgreSQL schemas
+        Звёзды: 420 · Лицензия: MIT · Последний релиз: v0.4.0 (5 дней назад)
+
+        --- README ---
+        # mcp-postgres-inspector
+
+        An MCP (Model Context Protocol) server that gives AI agents **read-only** access to your
+        PostgreSQL schema: tables, columns, indexes and foreign keys. The agent can explore the real
+        structure of your database before writing queries or migrations.
+
+        ## Install
+
+        Add it to Claude Code:
+
+            claude mcp add pg-inspector -- npx -y @acme-labs/mcp-postgres-inspector
+
+        Pass the connection string via the `DATABASE_URL` environment variable.
+
+        ## Requirements and limitations
+
+        - PostgreSQL 13 or newer.
+        - Read-only: the server never runs INSERT, UPDATE or DELETE.
+        - Row data is not exposed, only the schema.
+
+        ## Changelog
+
+        v0.4.0 — added index and foreign key listing.
+    llm:
+      score:
+        category: skill_mcp
+        scores: {novelty: 3, usefulness: 4, verifiability: 3, substance: 2, audience_fit: 1}
+        hard_stops: []
+        reason: Свежий MCP-сервер с понятной установкой и ограничениями, полезен при работе с базами
+        claims:
+          - "mcp-postgres-inspector — MCP-сервер, который даёт ИИ-агентам доступ только на чтение к схеме PostgreSQL: таблицы, колонки, индексы и внешние ключи."
+          - "Подключение к Claude Code: claude mcp add pg-inspector -- npx -y @acme-labs/mcp-postgres-inspector"
+          - "Строка подключения передаётся через переменную окружения DATABASE_URL."
+          - "Нужен PostgreSQL 13 или новее; данные строк сервер не отдаёт, только схему."
+      verify:
+        verdict: pass
+        fail_reason: ""
+        checks:
+          - {claim: "mcp-postgres-inspector — MCP-сервер, который даёт ИИ-агентам доступ только на чтение к схеме PostgreSQL: таблицы, колонки, индексы и внешние ключи.", status: supported, evidence: "README, первый абзац"}
+          - {claim: "Подключение к Claude Code: claude mcp add pg-inspector -- npx -y @acme-labs/mcp-postgres-inspector", status: supported, evidence: "раздел Install"}
+          - {claim: "Строка подключения передаётся через переменную окружения DATABASE_URL.", status: supported, evidence: "раздел Install"}
+          - {claim: "Нужен PostgreSQL 13 или новее; данные строк сервер не отдаёт, только схему.", status: supported, evidence: "Requirements and limitations"}
+        approved_claims: []
+      write: |
+        🧩 <b>mcp-postgres-inspector: MCP-сервер для просмотра схемы PostgreSQL</b>
+
+        Сервер даёт ИИ-агенту доступ только на чтение к схеме базы PostgreSQL: таблицы, колонки, индексы и внешние ключи.
+
+        <b>Зачем это вам:</b> агент в Claude Code видит реальную структуру базы и пишет запросы и миграции без догадок.
+        <b>Как попробовать за 5 минут:</b> выполните <code>claude mcp add pg-inspector -- npx -y @acme-labs/mcp-postgres-inspector</code> и передайте строку подключения в переменной DATABASE_URL.
+        <b>Подводный камень:</b> нужен PostgreSQL 13 или новее, а данные строк сервер не показывает — только схему.
+
+        <a href="https://github.com/acme-labs/mcp-postgres-inspector">Первоисточник</a>
+        ✅ Сверено с первоисточником · #skill

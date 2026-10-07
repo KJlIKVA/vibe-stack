@@ -1,0 +1,16 @@
+# окружение и секреты
+.venv/
+.env
+.env.*
+!.env.example
+
+# результаты запусков и локальное состояние (боевое состояние живёт в ветке state)
+out/
+state/
+
+# кэши
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.DS_Store

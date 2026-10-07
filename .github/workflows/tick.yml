@@ -1,0 +1,30 @@
+name: Срочный + публикация (каждые 30 минут)
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run — ничего не публикует; publish — по-настоящему"
+        type: choice
+        options: [dry-run, publish]
+        default: dry-run
+
+# Все контуры пишут одно состояние — выполняем их строго по одному.
+concurrency:
+  group: vibe-stack-state
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # нужно только job save в _run.yml; job с контурами получает права только на чтение
+
+jobs:
+  run:
+    # Расписание включается переменной репозитория VIBE_STACK_ENABLED=true (Settings → Variables).
+    if: github.event_name == 'workflow_dispatch' || vars.VIBE_STACK_ENABLED == 'true'
+    uses: ./.github/workflows/_run.yml
+    with:
+      commands: "urgent publish"
+      mode: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'publish' }}
+    secrets: inherit

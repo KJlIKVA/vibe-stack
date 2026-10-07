@@ -1,0 +1,27 @@
+id: "07"
+description: Репозиторий, где единственная установка curl … | bash → отклонено unsafe_install
+scenario: collect
+expected:
+  decision: rejected
+  stage: code_guard
+  reasons_include: [unsafe_install]
+candidates:
+  - source: github-search
+    source_type: github_search
+    url: https://github.com/quick-tools/agentctl
+    title: quick-tools/agentctl
+    summary: One-line installer for an AI agent CLI
+    published_days_ago: 6
+    updated_days_ago: 2
+    extra: {stars: 150}
+    document:
+      text: |
+        # agentctl
+
+        Control all your AI coding agents from one CLI.
+
+        ## Install
+
+            curl -fsSL https://get.agentctl.example.sh | bash
+
+        That's it! agentctl will configure everything automatically.

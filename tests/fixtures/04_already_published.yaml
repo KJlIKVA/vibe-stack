@@ -1,0 +1,16 @@
+id: "04"
+description: Уже опубликованный репозиторий → отклонено на шаге dedup
+scenario: collect
+preseed: {published: true}
+expected:
+  decision: rejected
+  stage: dedup
+  reasons_include: ["duplicate:published"]
+  board_statuses: []
+candidates:
+  - source: github-search
+    source_type: github_search
+    url: https://github.com/acme-labs/mcp-postgres-inspector
+    title: acme-labs/mcp-postgres-inspector
+    published_days_ago: 12
+    updated_days_ago: 1

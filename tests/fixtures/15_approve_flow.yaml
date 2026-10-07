@@ -1,0 +1,68 @@
+id: "15"
+description: Рубрика в режиме approve → «На одобрении», выходит только после смены статуса на «Одобрено»
+scenario: approve_flow
+board:
+  rubrics:
+    tool: {mode: approve}
+expected:
+  sent: 1
+  board_statuses: ["Опубликовано"]
+  summary:
+    collect.pending_approval: 1
+    publish_before.status: nothing_to_publish
+    publish_after.status: published
+candidates:
+  - source: github-search
+    source_type: github_search
+    url: https://github.com/acme-labs/diffguard
+    title: acme-labs/diffguard
+    summary: Review your git diff with an LLM before every commit
+    published_days_ago: 8
+    updated_days_ago: 1
+    extra: {stars: 310}
+    document:
+      text: |
+        # diffguard
+
+        diffguard reviews your staged git diff with an LLM before every commit and points out
+        likely bugs, leaked secrets and missing tests.
+
+        ## Install
+
+            pipx install diffguard
+            diffguard install-hook
+
+        The hook runs on `git commit`. Use `--no-verify` to skip it once.
+
+        ## Limitations
+
+        Requires an OpenAI-compatible API key. Large diffs (over 2000 lines) are skipped.
+    llm:
+      score:
+        category: tool
+        scores: {novelty: 3, usefulness: 4, verifiability: 3, substance: 2, audience_fit: 2}
+        hard_stops: []
+        reason: Понятный инструмент проверки диффа перед коммитом
+        claims:
+          - "diffguard проверяет подготовленный git diff с помощью LLM перед каждым коммитом и ищет вероятные баги, утёкшие секреты и недостающие тесты."
+          - "Установка: pipx install diffguard, затем diffguard install-hook."
+          - "Нужен ключ OpenAI-совместимого API; диффы больше 2000 строк пропускаются."
+      verify:
+        verdict: pass
+        fail_reason: ""
+        checks:
+          - {claim: "diffguard проверяет подготовленный git diff с помощью LLM перед каждым коммитом и ищет вероятные баги, утёкшие секреты и недостающие тесты.", status: supported, evidence: "первый абзац"}
+          - {claim: "Установка: pipx install diffguard, затем diffguard install-hook.", status: supported, evidence: "Install"}
+          - {claim: "Нужен ключ OpenAI-совместимого API; диффы больше 2000 строк пропускаются.", status: supported, evidence: "Limitations"}
+        approved_claims: []
+      write: |
+        🛠 <b>diffguard: ИИ-проверка диффа перед коммитом</b>
+
+        diffguard прогоняет подготовленный git diff через LLM перед каждым коммитом и ищет вероятные баги, утёкшие секреты и недостающие тесты.
+
+        <b>Зачем это вам:</b> ошибки и случайно закоммиченные ключи ловятся до того, как попадут в репозиторий.
+        <b>Как попробовать за 5 минут:</b> <code>pipx install diffguard</code>, затем <code>diffguard install-hook</code>.
+        <b>Подводный камень:</b> нужен ключ OpenAI-совместимого API, а диффы больше 2000 строк пропускаются.
+
+        <a href="https://github.com/acme-labs/diffguard">Первоисточник</a>
+        ✅ Сверено с первоисточником · #инструмент

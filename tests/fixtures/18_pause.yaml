@@ -1,0 +1,32 @@
+id: "18"
+description: Флажок «Пауза» в Notion → контуры публикации и срочный ничего не публикуют
+scenario: pause
+board:
+  settings: {pause: true}
+  posts:
+    - title: acme-labs/diffguard
+      rubric: tool
+      status: Одобрено
+      source_url: https://github.com/acme-labs/diffguard
+      source_domain: github.com
+      score: 14
+      html: |
+        🛠 <b>diffguard</b>
+
+        Тестовый пост. <a href="https://github.com/acme-labs/diffguard">Первоисточник</a>
+        ✅ Сверено с первоисточником · #инструмент
+expected:
+  sent: 0
+  no_decisions: true
+  board_statuses: ["Одобрено"]
+  summary:
+    publish.status: paused
+    urgent.status: paused
+candidates:
+  - source: openai-news
+    source_type: rss
+    url: https://openai.com/index/introducing-fixturemodel-1
+    title: Introducing FixtureModel-1
+    published_hours_ago: 1
+    whitelist: true
+    official_domains: [openai.com]

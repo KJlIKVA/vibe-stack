@@ -1,0 +1,11 @@
+id: "09"
+description: День без подходящих кандидатов → публикаций ноль, причина в логе
+scenario: empty_day
+expected:
+  sent: 0
+  no_decisions: true
+  summary:
+    collect.reason: "нет кандидатов: источники ничего не вернули"
+    publish.status: nothing_to_publish
+    publish.reason: очередь пуста
+candidates: []
