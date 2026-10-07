@@ -48,5 +48,5 @@ def setup_logging(out_dir: Path | None, verbose: bool = False) -> None:
         fh.addFilter(redact)
         root.addHandler(fh)
     # сторонние библиотеки пишут URL запросов — в Telegram они содержат токен
-    for noisy in ("httpx", "httpcore", "openai", "notion_client"):
+    for noisy in ("httpx", "httpcore", "httpx2", "httpcore2", "openai", "notion_client"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

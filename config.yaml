@@ -7,7 +7,7 @@ channel:
   tz: Europe/Moscow
   # @username канала без «@» — нужен для ссылок на посты в «Итогах недели».
   # Пусто — ссылки строятся по TELEGRAM_CHANNEL_ID (вид t.me/c/...).
-  username: ""
+  username: "vibestack_off"
 
 llm:
   provider: openai

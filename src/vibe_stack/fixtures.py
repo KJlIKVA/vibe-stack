@@ -202,6 +202,8 @@ def check_expected(fx: Fixture, actual: dict[str, Any]) -> list[str]:
             out.append(f"decision: ждали {exp['decision']}, получили {got}")
     if "stage" in exp and (last["stage"] if last else None) != exp["stage"]:
         out.append(f"stage: ждали {exp['stage']}, получили {last['stage'] if last else None}")
+    if "stage_in" in exp and (last["stage"] if last else None) not in exp["stage_in"]:
+        out.append(f"stage: ждали одно из {exp['stage_in']}, получили {last['stage'] if last else None}")
     if "rubric" in exp and (last["rubric"] if last else None) != exp["rubric"]:
         out.append(f"rubric: ждали {exp['rubric']}, получили {last['rubric'] if last else None}")
     for reason in exp.get("reasons_include", []):

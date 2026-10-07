@@ -82,3 +82,9 @@ def test_bare_urls_domains_and_mentions_rejected() -> None:
     # внутри <code> Telegram ссылок не делает: npm-скоупы и команды разрешены
     ok = GOOD.replace("Суть.", "Запуск: <code>npx -y @acme-labs/mcp-inspector</code>, нужен Node.js и README.md.")
     assert lint(ok) == []
+
+
+def test_title_numbers_are_not_verified() -> None:
+    """Заголовок из источника — не проверенный факт: «40 языков» из заголовка без подтверждения не пройдёт."""
+    post = GOOD.replace("Суть.", "Переводит код между 40 языками.")
+    assert "unverified_numbers:40" in lint(post, allowed_text="codetrans переводит код между Python и JavaScript")

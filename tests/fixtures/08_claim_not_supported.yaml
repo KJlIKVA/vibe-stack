@@ -1,16 +1,18 @@
 id: "08"
-description: Утверждение из заголовка не найдено в README → B not_supported, меньше 2 подтверждённых — пост не выходит
+description: Утверждения из заголовка нет в README → B not_supported, меньше 2 подтверждённых — пост не выходит
+# С ответами из фикстуры A «верит» заголовку, и пост останавливает проверка B.
+# Настоящая модель обычно не берёт утверждения из заголовка и отсекает такой кандидат ещё на гейте.
+# Ожидание одно: пост не выходит.
 scenario: collect
 expected:
   decision: rejected
-  stage: verify
-  reasons_include: [verify_fail]
+  stage_in: [gate, verify]
   sent: 0
 candidates:
   - source: github-search
     source_type: github_search
     url: https://github.com/polyglot-ai/codetrans
-    title: "codetrans: переводит код между 40 языками программирования"
+    title: "codetrans: переводит код между 40 языками и ускоряет миграции в 10 раз"
     summary: Translate code between languages with an LLM
     published_days_ago: 9
     updated_days_ago: 2
@@ -19,15 +21,9 @@ candidates:
       text: |
         # codetrans
 
-        Translate code between Python and JavaScript using an LLM.
+        Translate code with AI.
 
-        ## Install
-
-            pip install codetrans
-
-        ## Usage
-
-            codetrans input.py --to js
+        Documentation is coming soon. Star the repo to stay tuned!
     llm:
       score:
         category: tool
@@ -36,13 +32,13 @@ candidates:
         reason: Инструмент перевода кода между языками
         claims:
           - "codetrans переводит код между 40 языками программирования."
-          - "Устанавливается командой pip install codetrans."
+          - "codetrans переводит код с помощью ИИ."
           - "Поддерживает пакетный перевод целых репозиториев."
       verify:
         verdict: fail
-        fail_reason: "Подтверждается только установка; про 40 языков и пакетный перевод в источнике ничего нет"
+        fail_reason: "Подтверждается только общее описание; про 40 языков и пакетный перевод в источнике ничего нет"
         checks:
-          - {claim: "codetrans переводит код между 40 языками программирования.", status: not_supported, evidence: "README говорит только о Python и JavaScript"}
-          - {claim: "Устанавливается командой pip install codetrans.", status: supported, evidence: "раздел Install"}
+          - {claim: "codetrans переводит код между 40 языками программирования.", status: not_supported, evidence: "в README языки не перечислены"}
+          - {claim: "codetrans переводит код с помощью ИИ.", status: supported, evidence: "первая строка README"}
           - {claim: "Поддерживает пакетный перевод целых репозиториев.", status: not_supported, evidence: "в README нет"}
-        approved_claims: ["Устанавливается командой pip install codetrans."]
+        approved_claims: ["codetrans переводит код с помощью ИИ."]

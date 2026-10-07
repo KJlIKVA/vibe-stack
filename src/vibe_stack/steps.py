@@ -168,7 +168,8 @@ def write(rt: Runtime, c: Candidate, rubric_key: str, rubric: Rubric, approved: 
     meta = {"category": rubric_key, "url": c.url, "title": c.title, "mode": mode}
     prompt = prompts.write_prompt(approved, meta, rubric.overlay, rubric.emoji, rubric.hashtag)
     template = prompts.load(prompts.OVERLAY_FILES[rubric.overlay])
-    allowed = "\n".join([*approved, c.title])
+    # заголовок — тоже данные из интернета: числа в посте только из подтверждённых утверждений
+    allowed = "\n".join(approved)
 
     def check(text: str) -> list[str]:
         return lint_post(text, rubric=rubric_key, max_chars=rubric.max_chars, source_url=c.url,
