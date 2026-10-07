@@ -86,8 +86,19 @@ def _norm(name: str) -> str:
     return re.sub(r"[-_.]+", "_", name).lower()
 
 
+def _read_small(path: str) -> str:
+    """Текст файла без перехода по симлинкам и не больше 256 КБ."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return ""
+    with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
+        return f.read(262144)
+
+
 def pypi_scripts(workdir: Path, package: str) -> list[str]:
-    """console_scripts пакета из его dist-info. Файлы читаются как текст, без импорта кода и без симлинков."""
+    """Команды пакета: console_scripts из entry_points.txt и файлы в bin/ из RECORD (так ставятся бинарники,
+    например ruff). Файлы читаются как текст, без импорта кода и без перехода по симлинкам."""
     out: list[str] = []
     for site in (workdir / "venv" / "lib").glob("python3*/site-packages"):
         if site.is_symlink():
@@ -99,24 +110,20 @@ def pypi_scripts(workdir: Path, package: str) -> list[str]:
                 continue  # dist-info зависимости, а не самого пакета
             if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
                 continue
-            path = os.path.join(entry.path, "entry_points.txt")
-            try:
-                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-            except OSError:
-                continue
-            with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
-                text = f.read(65536)
             section = None
-            for line in text.splitlines():
+            for line in _read_small(os.path.join(entry.path, "entry_points.txt")).splitlines():
                 line = line.strip()
                 if line.startswith("["):
                     section = line.strip("[]").strip()
                 elif section == "console_scripts" and "=" in line:
-                    name = line.split("=", 1)[0].strip()
-                    if BIN.match(name):
-                        out.append(name)
+                    out.append(line.split("=", 1)[0].strip())
+            for line in _read_small(os.path.join(entry.path, "RECORD")).splitlines():
+                path = line.split(",", 1)[0]
+                if path.startswith("../../../bin/") and path.count("/") == 4:
+                    out.append(path.rsplit("/", 1)[1])
+    names = {n for n in out if BIN.match(n)}
     # сначала команда с именем пакета
-    return sorted(set(out), key=lambda n: (_norm(n) != _norm(package), n))
+    return sorted(names, key=lambda n: (_norm(n) != _norm(package), n))
 
 
 def valid(req: Any) -> bool:

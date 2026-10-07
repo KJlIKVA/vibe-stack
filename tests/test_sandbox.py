@@ -216,3 +216,11 @@ def test_workflow_run_job_has_no_secrets_and_no_permissions() -> None:
     plan = json.dumps(wf["jobs"]["plan"])
     assert "OPENAI" not in plan and "TELEGRAM" not in plan and "NOTION" not in plan
     assert wf["jobs"]["save"]["concurrency"]["group"] == "vibe-stack-state"
+
+
+def test_pypi_binary_scripts_from_record(tmp_path) -> None:
+    site = tmp_path / "venv" / "lib" / "python3.12" / "site-packages"
+    (site / "ruff-0.16.10.dist-info").mkdir(parents=True)
+    (site / "ruff-0.16.10.dist-info" / "RECORD").write_text(
+        "../../../bin/ruff,sha256=x,123\nruff/__init__.py,sha256=y,1\n../../../bin/../../evil,sha256=z,1\n")
+    assert sandbox_runner.pypi_scripts(tmp_path, "ruff") == ["ruff"]
