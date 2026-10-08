@@ -170,6 +170,7 @@ def publish_post(rt: Runtime, post: PostRecord, *, slot: str | None, urgent: boo
                            "повторно автоматически не отправляю")
         mid = None
     _record(rt, post, ref, mid, now, slot=slot, urgent=urgent, counts_regular=counts_regular)
+    rt.state.expire_sandbox(post.candidate_id, now)  # пост вышел — запускать его пакет больше незачем
     if mid is None:
         return False
     extra = {"html": text} if text != post.html else {}

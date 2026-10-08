@@ -3,7 +3,10 @@
 Кто что делает:
 - сбор (этот модуль): находит в тексте первоисточника команду установки (pip/pipx/uv/npm/npx), проверяет
   пакет в реестре (PyPI или npm) и ставит заявку. Пакет принимается, только если реестр ссылается на тот же
-  репозиторий GitHub, что и пост: так README не подсунет чужой пакет;
+  репозиторий GitHub, что и пост, и это подтверждено: provenance пакета (PEP 740 / npm provenance) указывает
+  на этот репозиторий, а без provenance — сам репозиторий объявляет это имя пакета (package.json,
+  pyproject.toml, setup.cfg в корне). Так README или чужой пакет со ссылкой на репозиторий не подсунут
+  чужой код под пометку «Запущено»;
 - .github/workflows/sandbox.yml: job без секретов и без прав ставит пакет и запускает `--help`
   в изолированном контейнере (sandbox_runner.py), job save записывает результат (`sandbox-apply`);
 - публикация: ждёт результат до sandbox.max_wait_minutes. Если запуск прошёл, код (а не модель) добавляет
@@ -14,19 +17,23 @@
 
 from __future__ import annotations
 
+import base64
+import configparser
 import html
 import json
 import logging
 import re
+import tomllib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
 from .models import PostRecord
+from .sandbox_runner import _norm, related
 from .timeutil import parse_dt
 from .urls import github_repo
 
@@ -38,7 +45,8 @@ NPM_NAME = re.compile(r"^(@[a-z0-9][a-z0-9._~-]{0,60}/)?[a-z0-9][a-z0-9._~-]{0,1
 VERSION = re.compile(r"^[0-9A-Za-z.+!_-]{1,40}$")
 BIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$")
 COMMAND = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60} --(help|version)$")
-STAGES = {"invalid", "install", "discover", "run"}
+STAGES = {"invalid", "install", "discover", "run", "error"}
+MAX_MANIFEST = 512 * 1024
 
 _FLAGS = r"((?:-{1,2}[A-Za-z][\w-]*\s+)*)"
 _START = r"(?:^|[\s`$>(])"
@@ -62,6 +70,7 @@ class Resolved:
     package: str
     version: str
     bins: list[str]
+    origin: str | None = None  # provenance | manifest; None — без сверки с репозиторием (ручная проверка)
 
 
 def extract_install_candidates(text: str) -> list[tuple[str, str]]:
@@ -99,7 +108,8 @@ def _repos_in(values: list[Any]) -> set[str]:
 
 
 class Registry:
-    """Проверка пакета в реестре: существует, ссылается на репозиторий поста, есть что запускать."""
+    """Проверка пакета в реестре: существует, ссылается на репозиторий поста, происхождение подтверждено,
+    есть что запускать."""
 
     def __init__(self, client: httpx.Client) -> None:
         self.client = client
@@ -111,13 +121,24 @@ class Registry:
             return self._npm(name, repo)
         return None
 
-    def _get(self, url: str) -> dict[str, Any] | None:
-        r = self.client.get(url, headers={"Accept": "application/json"})
+    def _fetch(self, url: str) -> httpx.Response | None:
+        """GET с редиректами (PyPI переадресует ненормализованные имена), но только в пределах того же хоста."""
+        r = self.client.get(url, headers={"Accept": "application/json"}, follow_redirects=True)
+        if urlsplit(str(r.url)).hostname != urlsplit(url).hostname:
+            raise ValueError(f"редирект на другой хост: {urlsplit(str(r.url)).hostname}")
         if r.status_code == 404:
             return None
         r.raise_for_status()
-        data = r.json()
+        return r
+
+    def _get(self, url: str) -> dict[str, Any] | None:
+        r = self._fetch(url)
+        data = r.json() if r is not None else None
         return data if isinstance(data, dict) else None
+
+    def _text(self, url: str) -> str | None:
+        r = self._fetch(url)
+        return r.text if r is not None and len(r.content) <= MAX_MANIFEST else None
 
     def _pypi(self, name: str, repo: str | None) -> Resolved | None:
         if not PYPI_NAME.match(name):
@@ -135,7 +156,14 @@ class Registry:
         wheels = [f for f in data.get("urls") or [] if f.get("packagetype") == "bdist_wheel" and not f.get("yanked")]
         if not VERSION.match(version) or not wheels:
             return None  # без wheel пришлось бы выполнять setup.py при установке — так не делаем
-        return Resolved("pypi", str(info.get("name") or name), version, [])
+        package = str(info.get("name") or name)
+        origin = None
+        if repo is not None:
+            prov = self._pypi_provenance(package, version, str(wheels[0].get("filename") or ""))
+            origin = _origin("pypi", package, repo, prov, lambda: self._manifest_names("pypi", repo))
+            if origin is None:
+                return None
+        return Resolved("pypi", package, version, [], origin)
 
     def _npm(self, name: str, repo: str | None) -> Resolved | None:
         if not NPM_NAME.match(name):
@@ -160,7 +188,93 @@ class Registry:
         bins = [b for b in bins if BIN.match(b)][:5]
         if not VERSION.match(version) or not bins:
             return None  # библиотека без команды: запускать нечего
-        return Resolved("npm", name, version, bins)
+        origin = None
+        if repo is not None:
+            origin = _origin("npm", name, repo, self._npm_provenance(data),
+                             lambda: self._manifest_names("npm", repo))
+            if origin is None:
+                return None
+        return Resolved("npm", name, version, bins, origin)
+
+    # --- происхождение пакета ---------------------------------------------------------------------------
+    # Подписи Sigstore здесь не проверяются: PyPI и npm сами проверяют provenance при публикации, мы доверяем
+    # реестру (как и при установке). Сверяем только, из какого репозитория пакет собран.
+    def _pypi_provenance(self, name: str, version: str, filename: str) -> set[str] | None:
+        """Репозитории GitHub из provenance файла (PEP 740). None — provenance нет."""
+        if not filename:
+            return None
+        data = self._get(f"https://pypi.org/integrity/{quote(name)}/{quote(version)}/{quote(filename)}/provenance")
+        repos = set()
+        for bundle in (data or {}).get("attestation_bundles") or []:
+            pub = bundle.get("publisher") if isinstance(bundle, dict) else None
+            ok = isinstance(pub, dict) and pub.get("kind") == "GitHub" and isinstance(pub.get("repository"), str)
+            repos.add(str(pub["repository"]).lower() if ok else "")  # другой издатель — не наш репозиторий
+        return repos or None
+
+    def _npm_provenance(self, data: dict[str, Any]) -> set[str] | None:
+        """Репозитории GitHub из SLSA provenance пакета npm (`dist.attestations`). None — provenance нет."""
+        att = (data.get("dist") or {}).get("attestations") if isinstance(data.get("dist"), dict) else None
+        url = att.get("url") if isinstance(att, dict) else None
+        if not isinstance(url, str) or not url.startswith("https://registry.npmjs.org/"):
+            return None
+        repos = set()
+        for a in (self._get(url) or {}).get("attestations") or []:
+            if not isinstance(a, dict) or "slsa.dev/provenance" not in str(a.get("predicateType")):
+                continue
+            try:
+                stmt = json.loads(base64.b64decode(a["bundle"]["dsseEnvelope"]["payload"]))
+                pred = stmt["predicate"]
+            except (KeyError, TypeError, ValueError):
+                continue
+            # SLSA v1: buildDefinition.externalParameters.workflow.repository; v0.2: invocation.configSource.uri
+            wf = ((pred.get("buildDefinition") or {}).get("externalParameters") or {}).get("workflow") or {}
+            src = wf.get("repository") or ((pred.get("invocation") or {}).get("configSource") or {}).get("uri")
+            repos.add(github_repo(re.sub(r"^git\+", "", str(src or "")).split("@")[0]) or "")
+        return repos or None
+
+    def _manifest_names(self, ecosystem: str, repo: str) -> set[str]:
+        """Имена пакета, которые объявляет сам репозиторий в корне (ветка по умолчанию)."""
+        base = f"https://raw.githubusercontent.com/{repo}/HEAD/"
+        if ecosystem == "npm":
+            try:
+                pkg = json.loads(self._text(base + "package.json") or "null")
+            except ValueError:
+                return set()
+            return {pkg["name"]} if isinstance(pkg, dict) and isinstance(pkg.get("name"), str) else set()
+        names: set[str] = set()
+        if text := self._text(base + "pyproject.toml"):
+            try:
+                t = tomllib.loads(text)
+            except tomllib.TOMLDecodeError:
+                t = {}
+            for n in ((t.get("project") or {}).get("name"), ((t.get("tool") or {}).get("poetry") or {}).get("name")):
+                if isinstance(n, str):
+                    names.add(_norm(n))
+        if not names and (text := self._text(base + "setup.cfg")):
+            cp = configparser.ConfigParser(interpolation=None)
+            try:
+                cp.read_string(text)
+                if n := cp.get("metadata", "name", fallback=""):
+                    names.add(_norm(n))
+            except configparser.Error:
+                pass
+        return names
+
+
+def _origin(ecosystem: str, package: str, repo: str, provenance: set[str] | None, manifest: Any) -> str | None:
+    """Чем подтверждено, что пакет из репозитория поста. provenance из другого репозитория — отказ без вариантов."""
+    if provenance is not None:
+        if repo in provenance:
+            return "provenance"
+        log.info("песочница: %s %s собран не из %s (provenance: %s) — не запускаем", ecosystem, package, repo,
+                 ", ".join(sorted(provenance)) or "—")
+        return None
+    names = manifest()
+    if (_norm(package) if ecosystem == "pypi" else package) in names:
+        return "manifest"
+    log.info("песочница: %s %s — нет provenance, и %s не объявляет этот пакет — не запускаем", ecosystem, package,
+             repo)
+    return None
 
 
 def plan(rt: Any, *, candidate_id: str, url: str, rubric: str, doc_text: str) -> str | None:
@@ -186,7 +300,8 @@ def plan(rt: Any, *, candidate_id: str, url: str, rubric: str, doc_text: str) ->
             continue
         if res:
             rt.state.add_sandbox_request(candidate_id=candidate_id, repo=repo, ecosystem=res.ecosystem,
-                                         package=res.package, version=res.version, bins=res.bins, now=rt.now())
+                                         package=res.package, version=res.version, bins=res.bins,
+                                         origin=res.origin, now=rt.now())
             return f"{res.ecosystem}:{res.package}"
     return None
 
@@ -217,9 +332,12 @@ def with_mark(rt: Any, post: PostRecord) -> str:
 
 
 # --- обмен с workflow ---------------------------------------------------------------------------
-def export_requests(state: Any, limit: int) -> list[dict[str, Any]]:
+def export_requests(state: Any, limit: int, *, now: datetime, max_age_hours: int,
+                    max_attempts: int) -> list[dict[str, Any]]:
+    """Ожидающие заявки: свежие и без лишних попыток. Заявку, чей пост уже вышел, публикация закрывает сама."""
+    rows = state.sandbox_pending(limit, since=now - timedelta(hours=max_age_hours), max_attempts=max_attempts)
     return [{"id": r["candidate_id"], "ecosystem": r["ecosystem"], "package": r["package"],
-             "version": r["version"], "bins": json.loads(r["bins"] or "[]")} for r in state.sandbox_pending(limit)]
+             "version": r["version"], "bins": json.loads(r["bins"] or "[]")} for r in rows]
 
 
 def manual_request(registry: Registry, spec: str) -> list[dict[str, Any]]:
@@ -228,8 +346,8 @@ def manual_request(registry: Registry, spec: str) -> list[dict[str, Any]]:
     res = registry.resolve(eco.strip(), name.strip(), None)
     if res is None:
         raise SystemExit(f"песочница: {spec} — пакета нет, нет wheel или нечего запускать")
-    return [{"id": f"test-{res.ecosystem}-{res.package}", "ecosystem": res.ecosystem, "package": res.package,
-             "version": res.version, "bins": res.bins}]
+    rid = re.sub(r"[^\w.-]", "_", f"test-{res.ecosystem}-{res.package}")[:80]  # @scope/name → _scope_name
+    return [{"id": rid, "ecosystem": res.ecosystem, "package": res.package, "version": res.version, "bins": res.bins}]
 
 
 def _clean(text: Any, limit: int) -> str:
@@ -237,26 +355,55 @@ def _clean(text: Any, limit: int) -> str:
     return s[-limit:]
 
 
-def apply_results(state: Any, path: Path, now: datetime) -> dict[str, int]:
-    """Записывает результаты песочницы. Принимаются только ответы на ожидающие заявки и только в строгом формате."""
-    counts = {"ok": 0, "failed": 0, "ignored": 0}
+def _load_list(path: Path) -> list[Any]:
     try:
-        results = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        results = []
-    for r in results if isinstance(results, list) else []:
-        row = state.sandbox_row(r.get("id") if isinstance(r, dict) else None)
-        if row is None or row["status"] != "pending":
+        return []
+    return data if isinstance(data, list) else []
+
+
+def command_ok(command: str, row: Any) -> bool:
+    """Команда в пометке: формат «<bin> --help|--version», bin — из заявки (npm) или про этот пакет (PyPI)."""
+    if not COMMAND.match(command):
+        return False
+    bin_name = command.split(" ", 1)[0]
+    if row["ecosystem"] == "npm":
+        return bin_name in json.loads(row["bins"] or "[]")
+    return related(bin_name, row["package"])
+
+
+def apply_results(state: Any, results_path: Path, requests_path: Path, now: datetime, *,
+                  max_attempts: int) -> dict[str, int]:
+    """Записывает результаты песочницы. Job с чужим кодом мог подменить results.json, поэтому принимаются только
+    ответы на заявки этого запуска (requests.json от job plan), каждая один раз, в строгом формате."""
+    counts = {"ok": 0, "failed": 0, "retry": 0, "ignored": 0}
+    asked = {(q["id"], q["version"]) for q in _load_list(requests_path)
+             if isinstance(q, dict) and isinstance(q.get("id"), str) and isinstance(q.get("version"), str)}
+    done: set[tuple[str, str]] = set()
+    for r in _load_list(results_path):
+        rid, ver = (r.get("id"), r.get("version")) if isinstance(r, dict) else (None, None)
+        key = (rid, ver) if isinstance(rid, str) and isinstance(ver, str) else None
+        row = state.sandbox_request(*key) if key in asked and key not in done else None
+        if key is None or row is None or row["status"] != "pending":
             counts["ignored"] += 1
+            continue
+        done.add(key)
+        if r.get("stage") == "started":  # запуск оборвался на этой заявке
+            if state.sandbox_attempt(*key) < max_attempts:
+                counts["retry"] += 1
+                continue
+            state.finish_sandbox(*key, ok=False, stage="error", command="",
+                                 detail="запуск песочницы обрывался на этой заявке", now=now)
+            counts["failed"] += 1
             continue
         ok = r.get("ok") is True
         stage = r.get("stage") if r.get("stage") in STAGES else "invalid"
         command = str(r.get("command") or "")
-        if ok and not COMMAND.match(command):
-            ok, stage = False, "invalid"
-        if not ok and not COMMAND.match(command):
+        if not command_ok(command, row):
+            ok, stage = (False, "invalid") if ok else (False, stage)
             command = ""
-        if state.finish_sandbox(row["candidate_id"], ok=ok, stage=stage, command=command,
-                                detail=_clean(r.get("detail"), 500), now=now):
+        if state.finish_sandbox(*key, ok=ok, stage=stage, command=command, detail=_clean(r.get("detail"), 500),
+                                now=now):
             counts["ok" if ok else "failed"] += 1
     return counts

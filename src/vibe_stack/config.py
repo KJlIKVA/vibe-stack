@@ -177,6 +177,8 @@ class SandboxConfig(BaseModel):
     ecosystems: list[str] = Field(default_factory=lambda: ["pypi", "npm"])
     max_wait_minutes: int = 120  # столько публикация ждёт результата, потом пост выходит без пометки
     max_requests_per_run: int = 10
+    max_age_hours: int = 24      # заявку старше этого в песочницу не отдаём
+    max_attempts: int = 2        # столько раз запуск может оборваться на заявке, потом она «не запустилась»
 
 
 class DigestConfig(BaseModel):

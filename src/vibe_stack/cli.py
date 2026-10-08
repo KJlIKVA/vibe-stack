@@ -64,6 +64,7 @@ def _parser() -> argparse.ArgumentParser:
     se.add_argument("--test", default="", help="проверочная заявка без состояния: pypi:<пакет> или npm:<пакет>")
     sa = sub.add_parser("sandbox-apply", help="записать результаты песочницы в состояние")
     sa.add_argument("results")
+    sa.add_argument("--requests", required=True, help="requests.json этого запуска (от job plan)")
     return p
 
 
@@ -83,7 +84,7 @@ def main(argv: list[str] | None = None) -> None:
         elif args.command == "sandbox-export":
             code = sandbox_export(args, cfg)
         elif args.command == "sandbox-apply":
-            code = sandbox_apply(args)
+            code = sandbox_apply(args, cfg)
         else:
             code = status(args, cfg)
     except MissingSecret as e:
@@ -254,7 +255,8 @@ def sandbox_export(args: argparse.Namespace, cfg: Config) -> int:
         requests = manual_request(Registry(http), args.test)
     else:
         state = State(args.state)
-        requests = export_requests(state, cfg.sandbox.max_requests_per_run)
+        requests = export_requests(state, cfg.sandbox.max_requests_per_run, now=utc_now(),
+                                   max_age_hours=cfg.sandbox.max_age_hours, max_attempts=cfg.sandbox.max_attempts)
         state.close()
     out = Path(args.out_file)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -263,14 +265,16 @@ def sandbox_export(args: argparse.Namespace, cfg: Config) -> int:
     return 0
 
 
-def sandbox_apply(args: argparse.Namespace) -> int:
+def sandbox_apply(args: argparse.Namespace, cfg: Config) -> int:
     from .sandbox import apply_results
 
     setup_logging(None)
     state = State(args.state)
-    counts = apply_results(state, Path(args.results), utc_now())
+    counts = apply_results(state, Path(args.results), Path(args.requests), utc_now(),
+                           max_attempts=cfg.sandbox.max_attempts)
     state.close()
-    print(f"песочница: запущено {counts['ok']}, не запустилось {counts['failed']}, пропущено {counts['ignored']}")
+    print(f"песочница: запущено {counts['ok']}, не запустилось {counts['failed']}, "
+          f"повторим {counts['retry']}, пропущено {counts['ignored']}")
     return 0
 
 

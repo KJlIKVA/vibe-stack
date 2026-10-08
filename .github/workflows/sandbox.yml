@@ -3,9 +3,14 @@
 # Три job:
 #   plan — читает заявки из состояния (токен только на чтение, секретов нет);
 #   run  — запускает находки: permissions: {}, НИ ОДНОГО секрета, без checkout. Код пакета работает только
-#          в контейнере без сети, не от root, с лимитами (src/vibe_stack/sandbox_runner.py);
-#   save — записывает результаты в ветку state (токен на запись, чужой код здесь не выполняется).
+#          под gVisor, без сети (установка — через прокси со списком адресов), не от root, с лимитами
+#          (src/vibe_stack/sandbox_runner.py);
+#   save — записывает результаты в ветку state (токен на запись есть только у шагов scripts/state.sh;
+#          чужой код здесь не выполняется, results.json проверяется по заявкам job plan).
 # Ручной запуск с полем test (например pypi:ruff) — проверка песочницы без записи состояния.
+#
+# Кэш Actions нигде не используется: если бы код пакета выбрался из песочницы, он мог бы отравить кэш,
+# который потом восстановят job с секретами.
 name: Песочница (установка и --help находок)
 
 on:
@@ -21,6 +26,11 @@ on:
         type: string
         default: ""
 
+# одна песочница за раз: заявки берутся из состояния, два параллельных запуска взяли бы одни и те же
+concurrency:
+  group: vibe-stack-sandbox
+  cancel-in-progress: false
+
 permissions: {}
 
 jobs:
@@ -32,6 +42,7 @@ jobs:
       contents: read
     outputs:
       count: ${{ steps.export.outputs.count }}
+      sha: ${{ steps.export.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -39,7 +50,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
-          enable-cache: true
+          enable-cache: false
 
       - name: Зависимости
         run: uv sync --frozen --no-dev
@@ -59,6 +70,8 @@ jobs:
           uv run --no-sync vibe-stack sandbox-export --out-file sandbox/requests.json --test "$TEST"
           cp src/vibe_stack/sandbox_runner.py sandbox/
           echo "count=$(python3 -c 'import json; print(len(json.load(open("sandbox/requests.json"))))')" >> "$GITHUB_OUTPUT"
+          # job save сверит заявки с этим хэшем: job run мог бы подменить артефакт
+          echo "sha=$(sha256sum sandbox/requests.json | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -70,7 +83,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.count != '0'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     permissions: {}
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -78,30 +91,64 @@ jobs:
           name: sandbox-in-${{ github.run_id }}-${{ github.run_attempt }}
           path: sandbox/
 
-      - name: Закрыть контейнерам служебные адреса машины
-        # метаданные облака и служебный адрес Azure: контейнеру с сетью (установка) туда нельзя
+      - name: gVisor — отдельное ядро-песочница для контейнеров с кодом пакета
+        env:
+          # версия закреплена хэшем (индекс apt-репозитория gVisor, 2026-10-08)
+          GVISOR_DEB: https://storage.googleapis.com/gvisor/releases/pool/20260928.0/binary-amd64/runsc.deb
+          GVISOR_SHA256: 73fbf1152ac33a99652ca78a6b67051f4c5ca3f34b50e14a6cfe97104534365e
         run: |
           set -euo pipefail
-          sudo iptables -I DOCKER-USER -d 169.254.0.0/16 -j DROP
-          sudo iptables -I DOCKER-USER -d 168.63.129.16 -j DROP
-          sudo iptables -L DOCKER-USER -n | grep -q 169.254.0.0/16
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/runsc.deb" "$GVISOR_DEB"
+          echo "$GVISOR_SHA256  $RUNNER_TEMP/runsc.deb" | sha256sum -c -
+          sudo dpkg -i "$RUNNER_TEMP/runsc.deb"
+          sudo runsc install
+          sudo systemctl restart docker
+          docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
+
+      - name: Сеть контейнеров — только публичный интернет
+        # Установка ходит наружу только через прокси (внутренняя сеть sbx-int → прокси в sbx-egress), запуск
+        # --help — без сети. Здесь страховка уровнем ниже: машина недоступна из контейнеров, а из сетей
+        # контейнеров нельзя открыть соединение в частные сети, к метаданным облака и служебному адресу Azure.
+        run: |
+          set -euo pipefail
+          for ifc in docker0 sbx-int sbx-egress; do sudo iptables -I INPUT -i "$ifc" -j DROP; done
+          for net in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 168.63.129.16/32; do
+            for ifc in docker0 sbx-egress; do sudo iptables -I DOCKER-USER -i "$ifc" -d "$net" -j DROP; done
+          done
+          # ответы на уже открытые соединения (их адрес назначения — частный адрес контейнера) — первыми
+          sudo iptables -I DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+          sudo iptables -S DOCKER-USER
+          sudo iptables -S INPUT | grep -c -- '-j DROP'
+
+      - name: Рабочая папка — tmpfs с лимитом размера
+        run: |
+          sudo mkdir -p /mnt/sbx
+          sudo mount -t tmpfs -o size=4g,mode=1777,nosuid,nodev tmpfs /mnt/sbx
 
       - name: Песочница
-        timeout-minutes: 35
+        timeout-minutes: 38
+        env:
+          SBX_ROOT: /mnt/sbx
         run: python3 -I sandbox/sandbox_runner.py sandbox/requests.json sandbox/results.json
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - name: Передать результаты в job save
+        # и после сбоя: результат пишется после каждой заявки
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: sandbox-out-${{ github.run_id }}-${{ github.run_attempt }}
           path: sandbox/results.json
           retention-days: 7
+          if-no-files-found: ignore
 
   save:
-    needs: run
-    if: needs.run.result == 'success' && inputs.test == ''
+    needs: [plan, run]
+    # и после сбоя job run: сделанное до сбоя сохранится, а заявка, на которой он оборвался, получит попытку
+    if: always() && inputs.test == '' && needs.plan.result == 'success' && needs.run.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # все, кто пишет состояние, — строго по одному
+    # все, кто пишет состояние, — строго по одному. Если этот job отменят (его место в очереди займёт
+    # другой запуск), заявки останутся ожидающими и пройдут при следующем запуске; job alert сообщит.
     concurrency:
       group: vibe-stack-state
       cancel-in-progress: false
@@ -114,27 +161,49 @@ jobs:
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
-          enable-cache: true
+          enable-cache: false
 
       - name: Зависимости
         run: uv sync --frozen --no-dev
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      - name: Заявки этого запуска (от job plan)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: sandbox-in-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sandbox-in/
+
+      - name: Сверить заявки с job plan
+        env:
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: echo "$SHA  sandbox-in/requests.json" | sha256sum -c -
+
+      - name: Результаты (от job run)
+        id: results
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           name: sandbox-out-${{ github.run_id }}-${{ github.run_attempt }}
-          path: sandbox/
+          path: sandbox-out/
 
-      - name: Записать результаты
+      - name: Загрузить состояние из ветки state
+        if: steps.results.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          scripts/state.sh pull
-          uv run --no-sync vibe-stack sandbox-apply sandbox/results.json
-          scripts/state.sh push sandbox
+        run: scripts/state.sh pull
+
+      - name: Записать результаты
+        if: steps.results.outcome == 'success'
+        run: uv run --no-sync vibe-stack sandbox-apply sandbox-out/results.json --requests sandbox-in/requests.json
+
+      - name: Сохранить состояние в ветку state
+        if: steps.results.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/state.sh push sandbox
 
   alert:
     needs: [plan, run, save]
-    if: failure()
+    if: always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -143,7 +212,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
-          TEXT: "Vibe Stack: песочница завершилась с ошибкой (посты выйдут без пометки «Запущено»): ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          TEXT: "Vibe Stack: песочница завершилась с ошибкой или была отменена (plan: ${{ needs.plan.result }}, run: ${{ needs.run.result }}, save: ${{ needs.save.result }}). Незаписанные заявки повторятся при следующем запуске, посты без результата выйдут без пометки «Запущено»: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$ADMIN_CHAT_ID" ]; then exit 0; fi
           curl -sS -o /dev/null --max-time 20 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \

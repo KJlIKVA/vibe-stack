@@ -89,18 +89,21 @@ CREATE TABLE IF NOT EXISTS glossary (
     post_url TEXT
 );
 CREATE TABLE IF NOT EXISTS sandbox (
-    candidate_id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL,
+    version TEXT NOT NULL,         -- заявка — на пару (кандидат, версия): результат старой версии новую не помечает
     repo TEXT NOT NULL,
     ecosystem TEXT NOT NULL,
     package TEXT NOT NULL,
-    version TEXT NOT NULL,
     bins TEXT NOT NULL,            -- JSON: имена команд из реестра (npm); для PyPI — пусто, ищутся после установки
-    status TEXT NOT NULL,          -- pending | ok | failed
+    origin TEXT,                   -- чем подтверждено, что пакет из репозитория поста: provenance | manifest
+    status TEXT NOT NULL,          -- pending | ok | failed | expired (пост вышел раньше результата)
+    attempts INTEGER NOT NULL DEFAULT 0,  -- запуски, оборвавшиеся на этой заявке
     requested_at TEXT NOT NULL,
     finished_at TEXT,
-    stage TEXT,                    -- на чём остановились: install | discover | run
+    stage TEXT,                    -- на чём остановились: install | discover | run | invalid | error
     command TEXT,                  -- что именно запускалось, например «ruff --help»
-    detail TEXT                    -- хвост вывода (недоверенный текст: только для лога, не в посты и не в LLM)
+    detail TEXT,                   -- хвост вывода (недоверенный текст: только для лога, не в посты и не в LLM)
+    PRIMARY KEY (candidate_id, version)
 );
 CREATE INDEX IF NOT EXISTS idx_candidates_date ON candidates(local_date);
 CREATE INDEX IF NOT EXISTS idx_published_date ON published(local_date);
@@ -130,7 +133,22 @@ class State:
         self.db = sqlite3.connect(self.path)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        self._migrate()
         self.db.commit()
+
+    def _migrate(self) -> None:
+        """Таблица sandbox до 2026-10-08: ключ — только кандидат, без попыток и origin."""
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(sandbox)")}
+        if "attempts" in cols:
+            return
+        self.db.execute("ALTER TABLE sandbox RENAME TO sandbox_old")
+        self.db.executescript(SCHEMA)
+        self.db.execute(
+            "INSERT OR IGNORE INTO sandbox(candidate_id, version, repo, ecosystem, package, bins, status, "
+            "requested_at, finished_at, stage, command, detail) SELECT candidate_id, version, repo, ecosystem, "
+            "package, bins, status, requested_at, finished_at, stage, command, detail FROM sandbox_old"
+        )
+        self.db.execute("DROP TABLE sandbox_old")
 
     def close(self) -> None:
         self.db.commit()
@@ -291,33 +309,62 @@ class State:
 
     # --- песочница ---------------------------------------------------------------------------
     def add_sandbox_request(self, *, candidate_id: str, repo: str, ecosystem: str, package: str, version: str,
-                            bins: list[str], now: datetime) -> None:
+                            bins: list[str], origin: str | None = None, now: datetime) -> None:
         self.db.execute(
-            "INSERT OR IGNORE INTO sandbox(candidate_id, repo, ecosystem, package, version, bins, status, "
-            "requested_at) VALUES (?,?,?,?,?,?,'pending',?)",
-            (candidate_id, repo, ecosystem, package, version, json.dumps(bins), iso(now)),
+            "INSERT OR IGNORE INTO sandbox(candidate_id, version, repo, ecosystem, package, bins, origin, status, "
+            "requested_at) VALUES (?,?,?,?,?,?,?,'pending',?)",
+            (candidate_id, version, repo, ecosystem, package, json.dumps(bins), origin, iso(now)),
         )
         self.db.commit()
 
     def sandbox_row(self, candidate_id: str | None) -> sqlite3.Row | None:
+        """Последняя заявка кандидата — по ней публикация ждёт результат и ставит пометку."""
         if not candidate_id:
             return None
-        return self.db.execute("SELECT * FROM sandbox WHERE candidate_id=?", (candidate_id,)).fetchone()
-
-    def sandbox_pending(self, limit: int) -> list[sqlite3.Row]:
         return self.db.execute(
-            "SELECT * FROM sandbox WHERE status='pending' ORDER BY requested_at LIMIT ?", (limit,)
+            "SELECT * FROM sandbox WHERE candidate_id=? ORDER BY requested_at DESC LIMIT 1", (candidate_id,)
+        ).fetchone()
+
+    def sandbox_request(self, candidate_id: str, version: str) -> sqlite3.Row | None:
+        return self.db.execute(
+            "SELECT * FROM sandbox WHERE candidate_id=? AND version=?", (candidate_id, version)
+        ).fetchone()
+
+    def sandbox_pending(self, limit: int, *, since: datetime, max_attempts: int) -> list[sqlite3.Row]:
+        return self.db.execute(
+            "SELECT * FROM sandbox WHERE status='pending' AND requested_at >= ? AND attempts < ? "
+            "ORDER BY requested_at LIMIT ?", (iso(since), max_attempts, limit)
         ).fetchall()
 
-    def finish_sandbox(self, candidate_id: str, *, ok: bool, stage: str, command: str, detail: str,
+    def finish_sandbox(self, candidate_id: str, version: str, *, ok: bool, stage: str, command: str, detail: str,
                        now: datetime) -> bool:
         cur = self.db.execute(
             "UPDATE sandbox SET status=?, stage=?, command=?, detail=?, finished_at=? "
-            "WHERE candidate_id=? AND status='pending'",
-            ("ok" if ok else "failed", stage, command, detail, iso(now), candidate_id),
+            "WHERE candidate_id=? AND version=? AND status='pending'",
+            ("ok" if ok else "failed", stage, command, detail, iso(now), candidate_id, version),
         )
         self.db.commit()
         return cur.rowcount == 1
+
+    def sandbox_attempt(self, candidate_id: str, version: str) -> int:
+        """+1 попытка ожидающей заявке (запуск оборвался на ней). Возвращает число попыток."""
+        self.db.execute(
+            "UPDATE sandbox SET attempts = attempts + 1 WHERE candidate_id=? AND version=? AND status='pending'",
+            (candidate_id, version),
+        )
+        self.db.commit()
+        row = self.sandbox_request(candidate_id, version)
+        return int(row["attempts"]) if row else 0
+
+    def expire_sandbox(self, candidate_id: str | None, now: datetime) -> None:
+        """Пост вышел раньше результата: запускать его пакет больше незачем."""
+        if not candidate_id:
+            return
+        self.db.execute(
+            "UPDATE sandbox SET status='expired', finished_at=? WHERE candidate_id=? AND status='pending'",
+            (iso(now), candidate_id),
+        )
+        self.db.commit()
 
     def sandbox_since(self, since: datetime) -> list[sqlite3.Row]:
         return self.db.execute("SELECT * FROM sandbox WHERE finished_at >= ?", (iso(since),)).fetchall()

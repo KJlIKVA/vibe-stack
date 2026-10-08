@@ -88,7 +88,7 @@ def build_digest(rt: Runtime, day: date) -> str:
         lines.append("⚠️ Источники с ошибкой: " + "; ".join(f"{k}: {v}" for k, v in list(broken.items())[:5]))
 
     # песочница
-    done = rt.state.sandbox_since(since)
+    done = [r for r in rt.state.sandbox_since(since) if r["status"] in ("ok", "failed")]
     if done:
         ok = sum(1 for r in done if r["status"] == "ok")
         lines.append(f"🧪 Песочница: запущено {ok} из {len(done)}")
