@@ -12,7 +12,7 @@ import httpx
 from ..config import SourceConfig
 from ..models import Candidate
 from ..timeutil import Clock
-from . import github, hackernews, rss, sitemap
+from . import github, hackernews, md_changelog, rss, sitemap, youtube
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +36,10 @@ def build_source(cfg: SourceConfig, client: httpx.Client, clock: Clock, max_age_
             return hackernews.HackerNewsSource(cfg, client, since)
         case "sitemap":
             return sitemap.SitemapSource(cfg, client, since)
+        case "md_changelog":
+            return md_changelog.MarkdownChangelogSource(cfg, client)
+        case "youtube":
+            return youtube.YouTubeSource(cfg, client)
     raise ValueError(f"неизвестный тип источника {cfg.type}")
 
 

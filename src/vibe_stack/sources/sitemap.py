@@ -49,6 +49,7 @@ class SitemapSource:
                 updated_at=lastmod,
                 whitelist=self.cfg.whitelist,
                 official_domains=self.cfg.official_domains,
-                signal=1.0,
+                # свежие страницы первыми: в sitemap сотни старых страниц с недавним lastmod
+                signal=1.0 + lastmod.timestamp() / 1e11,
             ))
         return out

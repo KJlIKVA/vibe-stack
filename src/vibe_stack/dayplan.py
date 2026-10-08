@@ -128,8 +128,8 @@ def plan(rt: Runtime, queue: list[PostRecord], *, limit: int, sent_today: int,
     return out
 
 
-def plan_text(rt: Runtime, queue: list[PostRecord]) -> str:
-    """«План на сегодня» для админа: всё, что стоит на сегодня, по времени."""
+def plan_text(rt: Runtime, queue: list[PostRecord], *, update: bool = False) -> str:
+    """«План на сегодня» для админа: всё, что стоит на сегодня, по времени. update — после дневного сбора."""
     tz = rt.tz
     today = rt.today()
     todays = sorted((p for p in queue if p.planned_at and local_date(p.planned_at, tz) == today),
@@ -137,7 +137,9 @@ def plan_text(rt: Runtime, queue: list[PostRecord]) -> str:
     if not todays:
         return ""
     rubrics = rt.cfg.rubrics
-    lines = [f"🗓 План на {today:%d.%m}: {len(todays)} пост(ов)", ""]
+    head = "🗓 Обновлённый план" if update else "🗓 План"
+    lines = [f"{head} на {today:%d.%m}: {len(todays)} пост(ов)" + (" — добавлены посты дневного сбора" if update
+                                                                   else ""), ""]
     for p in todays:
         assert p.planned_at is not None
         emoji = rubrics[p.rubric].title.split(" ", 1)[0] if p.rubric in rubrics else "•"
@@ -147,8 +149,9 @@ def plan_text(rt: Runtime, queue: list[PostRecord]) -> str:
     return "\n".join(lines)
 
 
-def plan_and_report(rt: Runtime) -> dict[str, Any]:
-    """После сбора: план на весь день и сообщение админу."""
+def plan_and_report(rt: Runtime, *, update: bool = False) -> dict[str, Any]:
+    """После сбора: план на весь день и сообщение админу. update — дневной сбор: только новые посты в свободные
+    слоты, сообщение — если что-то добавилось."""
     from .publish import board_sent_today, published_today_times, ready_queue
 
     summary: dict[str, Any] = {"planned": 0}
@@ -167,7 +170,10 @@ def plan_and_report(rt: Runtime) -> dict[str, Any]:
         summary["status"] = "board_unavailable"
         return summary
     summary["planned"] = len(assigned)
-    if text := plan_text(rt, queue):
+    if update and not assigned:
+        summary["status"] = "ok"
+        return summary
+    if text := plan_text(rt, queue, update=update):
         rt.notifier.notify(text)
         rt.write_out("plan.txt", text)
     summary["status"] = "ok"

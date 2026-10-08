@@ -168,13 +168,15 @@ def write(rt: Runtime, c: Candidate, rubric_key: str, rubric: Rubric, approved: 
     """Текст C + подвал кода + lint; при ошибках линтера — одна попытка исправить.
     extra — плейсхолдеры надстройки ({{термин}}); notes — блок решений владельца (например, о новой модели)."""
     meta = {"category": rubric_key, "url": c.url, "title": c.title, "mode": mode}
+    notes = "\n\n".join(n for n in (prompts.rubric_notes(rubric_key), notes) if n) or None
     prompt = prompts.write_prompt(approved, meta, rubric.overlay, rubric.emoji, rubric.hashtag, extra, notes)
     template = prompts.load(prompts.OVERLAY_FILES[rubric.overlay])
+    hashtags_from = prompts.footer_template(rubric_key, rubric.overlay)
     # заголовок — тоже данные из интернета: числа в посте только из подтверждённых утверждений
     allowed = "\n".join(approved)
 
     def finish(text: str) -> str:
-        return footer.apply(text, source_url=c.url, rubric=rubric, template=template)
+        return footer.apply(text, source_url=c.url, rubric=rubric, template=hashtags_from)
 
     def check(text: str) -> list[str]:
         return lint_post(text, rubric=rubric_key, max_chars=max_chars or rubric.max_chars, source_url=c.url,

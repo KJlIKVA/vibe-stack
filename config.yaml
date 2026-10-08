@@ -12,7 +12,7 @@ channel:
 llm:
   provider: openai
   base_url: null              # null = https://api.openai.com/v1
-  max_calls_per_run: 60       # MAX_LLM_CALLS_PER_RUN
+  max_calls_per_run: 150      # MAX_LLM_CALLS_PER_RUN (60 кандидатов за сбор: оценка + проверка + текст)
   daily_budget_usd: null      # лимит в долларах выключен: расход ограничивает лимит токенов ниже
   # Жёсткий дневной лимит токенов на модель (вход + выход с рассуждением), сутки по UTC — как у OpenAI.
   # Вызов, который может выйти за лимит (оценка входа + max_output_tokens шага), не делается.
@@ -62,12 +62,13 @@ planner:
   topic_similarity: 0.5       # порог сходства заголовков (Jaccard по словам)
   max_per_domain_per_day: 3   # у репозиториев GitHub «домен» — владелец (github.com/owner)
   weekly_min: {glossary: 1, analysis: 1}
-  weekly_max: {book_video: 2}
+  weekly_max: {book_video: 7}
+  daily_max: {book_video: 1}  # «Что посмотреть/послушать/почитать» — не больше одного в день
 
 collect:
-  max_candidates_to_score: 25 # сколько кандидатов за запуск идут в LLM
+  max_candidates_to_score: 60 # сколько кандидатов за запуск идут в LLM (решение 48: было 25, токенов хватает)
   max_per_source: 8           # не больше стольких от одного источника за запуск (источники идут по очереди)
-  max_minutes: 20             # дедлайн сбора; оставшиеся кандидаты ждут следующего дня
+  max_minutes: 30             # дедлайн сбора; оставшиеся кандидаты ждут следующего сбора
   code_injection_guard: true  # код сам ставит injection_detected по явным фразам, не дожидаясь LLM
 
 urgent:
@@ -86,6 +87,8 @@ fetch:
   max_bytes: 3000000
   max_doc_chars: 24000
   user_agent: "VibeStackBot/0.1 (+https://github.com/KJlIKVA/vibe-stack)"
+  # openai.com отвечает роботам из GitHub Actions 403 — тогда берём последнюю копию страницы из web.archive.org
+  archive_fallback_hosts: [openai.com]
 
 dedup:
   seen_ttl_days: 60           # отклонённое не пересматриваем столько дней; опубликованное — никогда
@@ -170,6 +173,16 @@ sources:
     whitelist: true
     official_domains: [openai.com]
     contours: [collect, urgent]
+  - name: openai-api-changelog
+    # решение 48: страницы openai.com из GitHub Actions закрыты (403), а официальный changelog API открыт.
+    # Каждая запись (новая модель, API, цены, лимиты) — отдельный кандидат, в том числе для срочного контура.
+    type: md_changelog
+    url: https://developers.openai.com/api/docs/changelog
+    title_prefix: "OpenAI API: "
+    max_age_days: 3   # в changelog записи за месяцы — новостью считаем только последние дни
+    whitelist: true
+    official_domains: [openai.com]
+    contours: [collect, urgent]
   - name: anthropic-news
     type: sitemap
     url: https://www.anthropic.com/sitemap.xml
@@ -178,6 +191,13 @@ sources:
     official_domains: [anthropic.com]
     contours: [collect, urgent]
     # RSS у Anthropic нет. Новая страница в /news/ = кандидат; заголовок и дату публикации код берёт со страницы
+  - name: anthropic-engineering
+    type: sitemap
+    url: https://www.anthropic.com/sitemap.xml
+    path_prefix: /engineering/
+    whitelist: true
+    official_domains: [anthropic.com]
+    contours: [collect]
   - name: google-deepmind-blog
     type: rss
     url: https://deepmind.google/blog/rss.xml
@@ -202,6 +222,74 @@ sources:
     whitelist: true
     official_domains: [github.com]
     contours: [collect, urgent]
+  - name: gemini-cli-releases
+    type: github_releases
+    repo: google-gemini/gemini-cli
+    whitelist: true
+    official_domains: [github.com]
+    contours: [collect, urgent]
+  - name: google-developers-blog
+    # в RSS нет дат — для срочного контура не годится, дату публикации код берёт со страницы
+    type: rss
+    url: https://developers.googleblog.com/rss/
+    whitelist: true
+    official_domains: [developers.googleblog.com]
+    contours: [collect]
+  - name: cursor-changelog
+    type: rss
+    url: https://cursor.com/changelog/rss.xml
+    whitelist: true
+    official_domains: [cursor.com]
+    contours: [collect, urgent]
+  - name: huggingface-blog
+    type: rss
+    url: https://huggingface.co/blog/feed.xml
+    contours: [collect]
+  - name: aider-releases
+    type: github_releases
+    repo: Aider-AI/aider
+    contours: [collect]
+  - name: cline-releases
+    type: github_releases
+    repo: cline/cline
+    contours: [collect]
+  - name: reddit
+    # лучшее за день в r/ClaudeAI и r/LocalLLaMA одним запросом: два запроса подряд Reddit режет (429)
+    type: rss
+    url: https://www.reddit.com/r/ClaudeAI+LocalLLaMA/top/.rss?t=day
+    contours: [collect]
+    skip_title_regex: ["(?i)\\b(meme|humor|funny|rant)\\b"]
+    aggregator_hosts: [reddit.com, redd.it]  # только посты со ссылкой наружу: GitHub, Hugging Face, статьи
+  - name: lobsters-ai
+    type: rss
+    url: https://lobste.rs/t/ai.rss
+    contours: [collect]
+  # --- что посмотреть, послушать, почитать (рубрика «Книга/видео», решение 48) ---
+  - name: latent-space
+    # подкаст и статьи о AI-инженерии; у выпусков есть полная расшифровка — по ней можно сверить факты
+    type: rss
+    url: https://www.latent.space/feed
+    contours: [collect]
+  - name: practical-ai
+    type: rss
+    url: https://changelog.com/practicalai/feed
+    contours: [collect]
+  - name: youtube
+    # YouTube Data API: RSS и страницы YouTube из GitHub Actions закрыты. Работает, только если в секретах GitHub
+    # есть YOUTUBE_API_KEY; без ключа источник молча пропускается. Каналы: AI Engineer (доклады конференций),
+    # Anthropic, OpenAI, Google for Developers, Google DeepMind, Andrej Karpathy, Latent Space.
+    type: youtube
+    contours: [collect]
+    channels: [UCLKPca3kwwd-B59HNr-_lvA, UCrDwWp7EBBv4NwvScIpBDOA, UCXZCJLdBC09xxGZ6gcdrc6A,
+               UC_x5XG1OV2P6uZZ5FSM9Ttw, UCP7jMXSY2xbc3KCAE0MHQ-A, UCXUPKJO5MZQN11PqgIvyuvQ,
+               UCvi5jNRoRVm436TVAXet1kQ]
+    skip_title_regex: ["#shorts"]
+  - name: pragprog-books
+    # новые книги Pragmatic Bookshelf — только про ИИ и разработку с ИИ
+    type: rss
+    url: https://pragprog.com/feed/global
+    contours: [collect]
+    include_title_regex: ["\\b(AI|LLMs?|GPT|Claude|Agents?|Agentic|Prompt\\w*|Machine Learning|Copilot|Generative|MCP)\\b"]
   - name: simon-willison
     type: rss
     url: https://simonwillison.net/atom/everything/

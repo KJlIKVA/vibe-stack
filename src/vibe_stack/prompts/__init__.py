@@ -65,10 +65,23 @@ def render(template: str, values: dict[str, str], meta: dict[str, Any] | None = 
 
 
 def score_prompt(candidate: dict[str, Any], source_document: str) -> str:
+    # решения владельца — отдельным блоком после текста ТЗ (сам текст ТЗ не меняется)
     return render(load("score_A"), {
         "candidate_json": json.dumps(candidate, ensure_ascii=False),
         "первоисточник, обрезанный": source_document,
-    })
+    }).rstrip("\n") + "\n\n" + load("score_notes")
+
+
+RUBRIC_NOTES = {"book_video": "book_video_notes"}  # блоки решений владельца к шаблонам C по рубрикам
+
+
+def rubric_notes(rubric_key: str) -> str | None:
+    return load(RUBRIC_NOTES[rubric_key]) if rubric_key in RUBRIC_NOTES else None
+
+
+def footer_template(rubric_key: str, overlay: str) -> str:
+    """Шаблон рубрики с блоками владельца — из него подвал берёт допустимые хештеги (#подкаст у «Книги/видео»)."""
+    return load(OVERLAY_FILES[overlay]) + "\n" + (rubric_notes(rubric_key) or "")
 
 
 def triage_prompt(candidate: dict[str, Any], source_document: str) -> str:

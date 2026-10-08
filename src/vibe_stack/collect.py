@@ -19,7 +19,7 @@ from .steps import doc_guards, gate, merge_batch, prefilter, verify, with_page_t
 
 log = logging.getLogger(__name__)
 CONTOUR = "collect"
-FEED_TYPES = ("rss", "sitemap", "github_releases")
+FEED_TYPES = ("rss", "sitemap", "github_releases", "md_changelog", "youtube")
 
 
 def run_collect(rt: Runtime) -> dict[str, Any]:
@@ -27,9 +27,12 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
                                "queued": 0, "pending_approval": 0, "rejected": 0, "fetch_failed": 0,
                                "errors": 0, "source_errors": {}, "stopped": None}
     now = rt.now()
-    done_key = f"collect:{rt.today().isoformat()}"
+    # два сбора в день (решение 48): утренний (до полудня по времени канала) и дневной — днём выходят новости США
+    half = collect_half(rt)
+    summary["half"] = half
+    done_key = f"collect:{rt.today().isoformat()}:{half}"
     if rt.already_done(done_key):
-        # второй cron-запуск на случай, если первый отменила очередь Actions
+        # запасной cron-запуск на случай, если первый отменила очередь Actions
         summary["status"] = "already_ran_today"
         return summary
     try:
@@ -46,12 +49,14 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
     if not raw:
         summary["reason"] = "нет кандидатов: источники ничего не вернули"
         log.info(summary["reason"])
-        _glossary_step(rt, summary)  # «Слово дня» от источников новостей не зависит
+        if half == "am":
+            _glossary_step(rt, summary)  # «Слово дня» от источников новостей не зависит
         return summary
 
     passed: list[Candidate] = []
-    max_age = timedelta(days=rt.cfg.gate.max_age_days)
+    ages = {s.name: s.max_age_days for s in rt.cfg.sources if s.max_age_days is not None}
     for c in merge_batch(raw):
+        max_age = timedelta(days=ages.get(c.source, rt.cfg.gate.max_age_days))
         if c.source_type in FEED_TYPES and c.freshest and now - c.freshest > max_age:
             continue  # старый хвост фида — не кандидат, а архив
         if outcome := rt.state.seen_outcome(c.keys, now, rt.cfg.dedup.seen_ttl_days):
@@ -100,13 +105,21 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
     if summary["queued"] + summary["pending_approval"] == 0 and not summary["stopped"]:
         summary["reason"] = "сегодня ничего не прошло отбор"
         log.info("публикаций из сбора ноль: %s", summary["reason"])
-    if not board_failed and not summary["stopped"]:
+    if not board_failed and not summary["stopped"] and half == "am":  # «Слово дня» — одно в день, утром
         board_failed = _glossary_step(rt, summary)
     if not board_failed:
-        summary["plan"] = dayplan.plan_and_report(rt)  # время каждому посту на сегодня + «План на сегодня» админу
+        # время каждому посту на сегодня + «План на сегодня» админу (после дневного сбора — обновлённый)
+        summary["plan"] = dayplan.plan_and_report(rt, update=half == "pm")
     if not board_failed:  # при сбое Notion второй cron-запуск дня попробует ещё раз
         rt.mark_done(done_key)
     return summary
+
+
+def collect_half(rt: Runtime) -> str:
+    """«am» — утренний сбор, «pm» — дневной (по времени канала)."""
+    from zoneinfo import ZoneInfo
+
+    return "am" if rt.now().astimezone(ZoneInfo(rt.tz)).hour < 12 else "pm"
 
 
 def fair_pick(cands: list[Candidate], limit: int, per_source: int) -> tuple[list[Candidate], list[Candidate]]:

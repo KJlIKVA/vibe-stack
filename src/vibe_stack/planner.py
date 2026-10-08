@@ -82,6 +82,10 @@ def pick_next(
     regular = [h for h in history if h.counts_regular and not h.urgent]
     last_rubric = max(regular, key=lambda h: h.published_at).rubric if regular else None
     domains_today = [domain_key(h.source_url, h.domain) for h in history if h.local_date == today]
+    rubric_today: dict[str, int] = {}
+    for h in history:
+        if h.local_date == today:
+            rubric_today[h.rubric] = rubric_today.get(h.rubric, 0) + 1
     wk = week_start(today)
     week_counts: dict[str, int] = {}
     for h in history:
@@ -106,6 +110,8 @@ def pick_next(
             reasons.append(f"домен {domain} уже был сегодня")
         if (mx := weekly_max.get(p.rubric)) is not None and week_counts.get(p.rubric, 0) >= mx:
             reasons.append("недельный максимум рубрики")
+        if (dmx := cfg.daily_max.get(p.rubric)) is not None and rubric_today.get(p.rubric, 0) >= dmx:
+            reasons.append("дневной максимум рубрики")
         toks = topic_tokens(p.title, p.source_url)
         canon = canonical_url(p.source_url) if p.source_url else ""
         if any((canon and canon == c) or same_topic(toks, t, cfg.topic_similarity) for t, c in recent_topics):

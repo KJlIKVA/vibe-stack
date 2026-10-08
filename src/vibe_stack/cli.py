@@ -30,7 +30,7 @@ from .telegram import DryRunTelegram, Notifier, Telegram
 from .timeutil import local_date, parse_dt, utc_now
 
 log = logging.getLogger("vibe_stack")
-CONTOURS = ("collect", "publish", "urgent", "weekly", "pin", "glossary", "digest")
+CONTOURS = ("collect", "publish", "urgent", "weekly", "pin", "glossary", "digest", "watchlist")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -187,12 +187,14 @@ def run_contour(args: argparse.Namespace, cfg: Config) -> int:
     from .pin import run_pin
     from .publish import run_publish
     from .urgent import run_urgent
+    from .watchlist import run_watchlist
     from .weekly import run_weekly
 
     rt = build_runtime(args, cfg, args.command)
     fn = {
         "collect": run_collect, "publish": run_publish, "urgent": run_urgent, "weekly": run_weekly,
         "pin": lambda r: run_pin(r, build_adapters(cfg)), "glossary": run_glossary, "digest": run_digest,
+        "watchlist": run_watchlist,
     }[args.command]
     status_ = "ok"
     try:

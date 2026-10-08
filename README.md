@@ -15,12 +15,13 @@
 
 | Контур | Команда | Расписание (Actions) |
 |---|---|---|
-| Сбор | `vibe-stack collect` | раз в день, 07:00 МСК, запасной запуск 08:30 (`collect.yml`) |
+| Сбор | `vibe-stack collect` | дважды в день: 07:00 и 14:00 МСК, запасные запуски 08:30 и 15:30 (`collect.yml`) |
 | Срочный | `vibe-stack urgent` | каждые 30 минут (`tick.yml`) |
 | План дня | после сбора (`collect`) и на каждом тике | каждому одобренному посту — время на сегодня (Notion «Время публикации»), админу «План на сегодня» |
 | Публикация | `vibe-stack publish` | каждые 30 минут выпускает посты, чьё время наступило, до 24 в день (`tick.yml`) |
-| Закреп и «Слово дня» | `vibe-stack pin`, `glossary` | вместе со сбором (`collect.yml`) |
+| Закреп и «Слово дня» | `vibe-stack pin`, `glossary` | вместе с утренним сбором (`collect.yml`) |
 | Песочница | `sandbox-export` → `sandbox_runner.py` → `sandbox-apply` | сразу после сбора, запасные запуски днём (`sandbox.yml`) |
+| Что посмотреть и послушать | `vibe-stack watchlist` | воскресенье, 12:00 МСК, запасной запуск 13:30 (`weekly.yml`) |
 | Итоги недели | `vibe-stack weekly` | воскресенье, 19:00 МСК, запасной запуск 20:30 (`weekly.yml`) |
 | Сводка дня админу | `vibe-stack digest` | 23:45 МСК, запасной запуск 23:55 (`digest.yml`) |
 
@@ -51,7 +52,7 @@ uv run vibe-stack collect --publish      # по-настоящему (нужны
 1. **Telegram.** Создайте канал и бота в @BotFather. Сделайте бота админом с правами публикации, редактирования и закрепления. Напишите боту в личку, чтобы он мог присылать вам оповещения.
 2. **OpenAI.** Ключ API с доступом к `gpt-5.6-terra`.
 3. **Notion.** Создайте внутреннюю интеграцию и пустую страницу «Vibe Stack», затем расшарьте страницу на интеграцию (••• → Connections). Положите `NOTION_TOKEN` и `NOTION_ROOT_PAGE_ID` в `.env` и выполните `uv run vibe-stack notion-setup`: команда создаст все базы, заполнит рубрики и источники и **включит Паузу**.
-4. **GitHub.** В Settings → Secrets → Actions добавьте `OPENAI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHANNEL_ID`, `ADMIN_CHAT_ID`, `NOTION_TOKEN`, `NOTION_ROOT_PAGE_ID`. Расписание включается переменной `VIBE_STACK_ENABLED=true` (Settings → Variables). Без неё workflows запускаются только вручную.
+4. **GitHub.** В Settings → Secrets → Actions добавьте `OPENAI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHANNEL_ID`, `ADMIN_CHAT_ID`, `NOTION_TOKEN`, `NOTION_ROOT_PAGE_ID` и, для видео YouTube, `YOUTUBE_API_KEY` (бесплатный ключ YouTube Data API v3 из Google Cloud Console; без него источник видео пропускается). Расписание включается переменной `VIBE_STACK_ENABLED=true` (Settings → Variables). Без неё workflows запускаются только вручную.
 5. Снимите «Паузу» в Notion, когда будете готовы.
 
 ## Безопасность

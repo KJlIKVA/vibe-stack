@@ -147,7 +147,7 @@ def publish_post(rt: Runtime, post: PostRecord, *, slot: str | None, urgent: boo
     original_html = post.html
     if rubric and post.source_url:
         # подвал собирает код: и у новых постов, и у написанных в старом формате (решение 47)
-        template = prompts.load(prompts.OVERLAY_FILES[rubric.overlay])
+        template = prompts.footer_template(post.rubric, rubric.overlay)
         post = post.model_copy(update={"html": footer.apply(post.html, source_url=post.source_url, rubric=rubric,
                                                              template=template)})
     # числа здесь не сверяем: текст мог поправить человек при одобрении
@@ -187,6 +187,10 @@ def publish_post(rt: Runtime, post: PostRecord, *, slot: str | None, urgent: boo
     if post.ref and not updated:
         rt.notifier.notify(f"пост «{post.title[:80]}» вышел (id {mid}), но статус в Notion остался «Отправляется»")
     rt.write_out(f"published/{mid}.html", text)
+    if post.rubric == "book_video":  # заголовок для воскресной подборки «Что посмотреть и послушать»
+        from .watchlist import remember_headline
+
+        remember_headline(rt, mid, text)
     log.info("опубликовано: %s (message_id=%s)", post.title, mid)
     if post.rubric == "glossary":
         from .glossary import on_published

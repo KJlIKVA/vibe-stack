@@ -90,6 +90,7 @@ class Planner(BaseModel):
     max_per_domain_per_day: int = 1
     weekly_min: dict[str, int] = Field(default_factory=dict)
     weekly_max: dict[str, int] = Field(default_factory=dict)
+    daily_max: dict[str, int] = Field(default_factory=dict)  # не больше стольких постов рубрики в день
 
 
 class Collect(BaseModel):
@@ -117,6 +118,8 @@ class Fetch(BaseModel):
     max_bytes: int = 3_000_000
     max_doc_chars: int = 24_000
     user_agent: str = "VibeStackBot/0.1"
+    # сайты, которые не пускают роботов из облака: при 403 — последняя копия из web.archive.org (решение 48)
+    archive_fallback_hosts: list[str] = Field(default_factory=list)
 
 
 class Dedup(BaseModel):
@@ -162,7 +165,8 @@ class Rubric(BaseModel):
 
 class SourceConfig(BaseModel):
     name: str
-    type: Literal["rss", "github_releases", "github_search", "hackernews", "sitemap", "fixture"]
+    type: Literal["rss", "github_releases", "github_search", "hackernews", "sitemap", "md_changelog", "youtube",
+                  "fixture"]
     url: str | None = None
     repo: str | None = None
     path_prefix: str | None = None
@@ -175,6 +179,13 @@ class SourceConfig(BaseModel):
     min_stars: int = 0
     min_points: int = 0
     skip_title_regex: list[str] = Field(default_factory=list)
+    include_title_regex: list[str] = Field(default_factory=list)  # непусто — берём только такие заголовки (книги по ИИ)
+    channels: list[str] = Field(default_factory=list)  # youtube: id каналов UC…
+    title_prefix: str = ""  # md_changelog: «OpenAI API: » перед текстом записи
+    max_age_days: int | None = None  # свой предел свежести вместо gate.max_age_days (changelog: только последние дни)
+    # агрегатор ссылок (Reddit): берём внешнюю ссылку «[link]» из записи; записи без неё (обсуждения, картинки,
+    # видео на этих хостах) пропускаем — их страницы роботам закрыты, а первоисточник — по внешней ссылке
+    aggregator_hosts: list[str] = Field(default_factory=list)
 
 
 class SandboxConfig(BaseModel):

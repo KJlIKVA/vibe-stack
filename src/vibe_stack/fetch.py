@@ -14,8 +14,11 @@ import httpx
 from .config import Fetch, env
 from .htmltext import html_to_text, page_images, published_from_meta
 from .models import FetchedDoc
+from .sources.md_changelog import entry_id, md_url, parse_entries
+from .sources.youtube import api_get as yt_api_get
+from .sources.youtube import duration_minutes, video_id
 from .timeutil import Clock
-from .urls import canonical_url, github_repo, host_of
+from .urls import canonical_url, github_repo, host_of, same_site
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +78,10 @@ class HttpFetcher:
                 return self._github_repo(url, repo)
             if repo and (m := _RELEASE_PATH.match(urlsplit(url).path)):
                 return self._github_release(url, repo, m.group(3))
+            if entry_id(url):
+                return self._changelog_entry(url)
+            if video_id(url):
+                return self._youtube(url)
             return self._generic(url)
         except (httpx.HTTPError, UnsafeURL, ValueError) as e:
             log.info("fetch failed %s: %s", url, e)
@@ -104,6 +111,12 @@ class HttpFetcher:
 
     def _generic(self, url: str) -> FetchedDoc:
         status, ctype, raw, final_url = self._get(url)
+        archived = False
+        if status == 403 and any(same_site(host_of(url), h) for h in self.cfg.archive_fallback_hosts):
+            # сайт не пускает роботов из облака (openai.com) — берём последнюю копию страницы из Архива интернета
+            a_status, a_ctype, a_raw, _ = self._get(f"https://web.archive.org/web/2id_/{url}")
+            if a_status < 400 and a_raw:
+                status, ctype, raw, archived = a_status, a_ctype, a_raw, True
         now = self.clock()
         if status >= 400:
             return FetchedDoc(url=url, final_url=final_url, ok=False, http_status=status,
@@ -119,6 +132,8 @@ class HttpFetcher:
         else:
             title, text, published = "", raw, None
         header = [f"[страница] {url}"]
+        if archived:
+            header.append("[текст из последней копии страницы в web.archive.org: сайт не пускает робота напрямую]")
         if title:
             header.append(f"Заголовок страницы: {title}")
         if published:
@@ -199,6 +214,47 @@ class HttpFetcher:
             text=truncate(text, self.cfg.max_doc_chars), error=None if body.strip() else "пустые release notes",
             image=github_card(repo),
         )
+
+    # --- changelog в Markdown, YouTube ---------------------------------------------------------------
+    def _changelog_entry(self, url: str) -> FetchedDoc:
+        """Одна запись changelog (адрес …/changelog?entry=<id>): документ — текст этой записи."""
+        status, _, raw, _ = self._get(md_url(url))
+        now = self.clock()
+        entry = next((e for e in parse_entries(raw) if e.id == entry_id(url)), None) if status < 400 else None
+        if entry is None:
+            return FetchedDoc(url=url, final_url=url, ok=False, http_status=status or 404, fetched_at=now,
+                              error=f"HTTP {status}" if status >= 400 else "запись changelog не найдена")
+        text = f"[запись changelog] {url.split('?')[0]}\n\n{entry.text()}"
+        return FetchedDoc(url=url, final_url=url, ok=True, http_status=status, fetched_at=now, title=entry.title,
+                          published_meta=entry.day.isoformat(), text=truncate(text, self.cfg.max_doc_chars))
+
+    def _youtube(self, url: str) -> FetchedDoc:
+        """Видео — через YouTube Data API: страницы YouTube из облака закрыты. Субтитров нет — только описание."""
+        now = self.clock()
+        vid = video_id(url)
+        if not env("YOUTUBE_API_KEY"):
+            return FetchedDoc(url=url, final_url=url, ok=False, fetched_at=now, error="YouTube: нет YOUTUBE_API_KEY")
+        data = yt_api_get(self.client, "videos", {"part": "snippet,contentDetails", "id": vid})
+        item = (data.get("items") or [None])[0]
+        if not item:
+            return FetchedDoc(url=url, final_url=url, ok=False, http_status=404, fetched_at=now,
+                              error="видео не найдено")
+        sn, cd = item.get("snippet") or {}, item.get("contentDetails") or {}
+        minutes = duration_minutes(cd.get("duration") or "")
+        thumbs = sn.get("thumbnails") or {}
+        thumb = next((thumbs[k]["url"] for k in ("maxres", "standard", "high") if k in thumbs), None)
+        lines = [
+            f"[видео YouTube] {sn.get('title') or ''}",
+            f"Канал: {sn.get('channelTitle') or '—'} · Опубликовано: {sn.get('publishedAt') or '—'}"
+            + (f" · Длительность: {minutes} мин" if minutes else ""),
+            f"Язык: {sn.get('defaultAudioLanguage') or sn.get('defaultLanguage') or '—'}",
+            "Субтитры недоступны: пересказ возможен только по описанию.",
+        ]
+        text = "\n".join(lines) + "\n\n--- Описание ---\n" + (sn.get("description") or "(описания нет)")
+        return FetchedDoc(url=url, final_url=url, ok=bool(sn.get("description")), http_status=200, fetched_at=now,
+                          title=sn.get("title") or "", published_meta=sn.get("publishedAt"),
+                          text=truncate(text, self.cfg.max_doc_chars), image=thumb,
+                          error=None if sn.get("description") else "у видео нет описания")
 
 
 class FixtureFetcher:

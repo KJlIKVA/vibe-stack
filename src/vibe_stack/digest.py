@@ -43,7 +43,7 @@ def build_digest(rt: Runtime, day: date) -> str:
         limit = rt.cfg.limits.regular_per_day
 
     # опубликовано
-    pub = [p for p in rt.state.published_since(day) if p.local_date == day and p.rubric != "weekly"]
+    pub = [p for p in rt.state.published_since(day) if p.local_date == day and p.rubric not in ("weekly", "watchlist")]
     regular = [p for p in pub if not p.urgent]
     urgent = [p for p in pub if p.urgent]
     lines += ["", f"Вышло: {len(regular)} из {limit} возможных" + (f", срочных {len(urgent)}" if urgent else "")]
