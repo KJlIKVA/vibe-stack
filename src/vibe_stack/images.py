@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from . import prompts
@@ -25,9 +26,19 @@ def _key(candidate_id: str) -> str:
     return f"image:{candidate_id}"
 
 
+# og:image некоторых сайтов — уменьшенная копия; в большом превью Telegram она мутная. Берём крупнее.
+_LARGER = [(re.compile(r"^(https://images\.manning\.com/)360/480/resize/"), r"\g<1>720/960/resize/")]
+
+
+def larger(url: str) -> str:
+    for rx, repl in _LARGER:
+        url = rx.sub(repl, url)
+    return url
+
+
 def remember(rt: Any, candidate_id: str | None, url: str | None) -> None:
     if rt.cfg.images.enabled and candidate_id and url:
-        rt.state.put(_key(candidate_id), url)
+        rt.state.put(_key(candidate_id), larger(url))
 
 
 def for_post(rt: Any, post: PostRecord) -> str | None:

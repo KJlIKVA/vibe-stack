@@ -281,6 +281,22 @@ def test_book_video_notes_allow_podcast_hashtag(cfg) -> None:
     assert "<рубрики_владельца>" in prompts.score_prompt({"id": "x"}, "doc")
 
 
+def test_book_post_knows_today_and_gets_larger_cover(cfg, tmp_path, now) -> None:
+    """Дата выхода книги — относительно сегодняшней; обложка Manning — крупная копия (решение 50)."""
+    from vibe_stack import images
+    from vibe_stack.models import Candidate
+    from vibe_stack.steps import write
+
+    rt = make_rt(cfg, tmp_path, now, mode="dry-run")
+    c = Candidate(source="manning-books", source_type="jsonld_list", url="https://www.manning.com/books/x", title="X")
+    rt.llm.responses[("write", c.id)] = "📚 <b>Book</b> — книга.\n\nО чём.\n<b>Где взять:</b> по ссылке"
+    write(rt, c, "book_video", cfg.rubrics["book_video"], ["a", "b"], mode="standard")
+    prompt = next(p for step, ctx, p in rt.llm.calls if step == "write")
+    assert f"Сегодня {rt.today():%d.%m.%Y}." in prompt and "{{сегодня}}" not in prompt
+    assert images.larger("https://images.manning.com/360/480/resize/book/a/b/DOTD_x.png") == \
+        "https://images.manning.com/720/960/resize/book/a/b/DOTD_x.png"
+
+
 def published_video(rt, mid: int, title: str, at: datetime, html: str) -> None:
     rt.state.record_published(ref=f"r{mid}", rubric="book_video", urgent=False, title=title, source_url="https://x.dev",
                               domain="x.dev", published_at=at, day=local_date(at, rt.tz), slot=None,
