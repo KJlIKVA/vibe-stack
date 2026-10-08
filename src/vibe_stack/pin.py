@@ -95,8 +95,13 @@ def run_pin(rt: Runtime, adapters: list[Any]) -> dict[str, Any]:
         summary["status"] = "paused"
         return summary
 
+    before = load_snapshots(rt)
     snaps, problems = refresh_snapshots(rt, adapters)
     summary["problems"] = problems
+    # кто-то новый в топ-3 или сменил место — короткий пост в канал (решение 58)
+    from .ratings_post import publish_changes
+
+    summary["ratings_post"] = publish_changes(rt, before, snaps, adapters)
     if problems:
         rt.notifier.notify("закреп: рейтинг не обновлён — " + "; ".join(problems)[:500])
     text = render(rt, snaps, adapters)

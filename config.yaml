@@ -115,7 +115,7 @@ rubrics:
   urgent:     {emoji: "🚨", hashtag: "#срочно",     title: "🚨 Срочно",     mode: auto, enabled: true, max_chars: 500, overlay: urgent}
   book_video: {emoji: "📚", hashtag: "#книга",      title: "📚 Книга/видео", mode: auto, enabled: true, max_chars: 800, overlay: book_video}
   benchmark:  {emoji: "📊", hashtag: "#бенчмарк",   title: "📊 Бенчмарк",   mode: auto, enabled: true, max_chars: 900, overlay: benchmark}
-  analysis:   {emoji: "🧠", hashtag: "#разбор",     title: "🧠 Разбор",     mode: approve, enabled: true, max_chars: 1500, overlay: analysis}
+  analysis:   {emoji: "🧠", hashtag: "#разбор",     title: "🧠 Разбор",     mode: auto, enabled: true, max_chars: 1500, overlay: analysis}
   weekly:     {emoji: "📋", hashtag: "#итоги",      title: "📋 Итоги недели", mode: auto, enabled: true, max_chars: 1200, overlay: weekly}
 
 

@@ -34,8 +34,10 @@ def test_create_pin_once_then_edit_only_on_change(cfg, tmp_path, now) -> None:
     assert "<b>Текст</b>\n1. A\n2. B\n3. C" in rt.tg.sent[0][1]
     assert run_pin(rt, [arena(["A", "B", "C"])])["status"] == "unchanged"
     s = run_pin(rt, [arena(["B", "A", "C"], date="2026-10-07")])
-    assert s["status"] == "edited" and len(rt.tg.sent) == 1 and len(rt.tg.pinned) == 1
+    assert s["status"] == "edited" and len(rt.tg.pinned) == 1
     assert "1. B\n2. A" in rt.tg.edited[-1][1]
+    # места сменились — кроме правки закрепа, в канал вышел короткий пост об изменении (решение 58)
+    assert len(rt.tg.sent) == 2 and "<b>Текст:</b> B — новый лидер, A опустилась на 2-е место." in rt.tg.sent[1][1]
 
 
 def test_failure_keeps_previous_date(cfg, tmp_path, now) -> None:
@@ -141,11 +143,41 @@ def test_unpinned_and_deleted_pin_is_recreated_even_without_changes(cfg, tmp_pat
     assert s["status"] == "created_and_pinned" and rt.tg.pinned == [-2]
 
 
-def test_analysis_is_approve_only_even_if_notion_says_auto(cfg, tmp_path, now) -> None:
+def test_everything_auto_but_notion_can_still_ask_for_approval(cfg, tmp_path, now) -> None:
+    """Решение 58: все рубрики выходят автоматически, «Разбор» тоже; режим approve можно включить в Notion."""
     from vibe_stack.board import RubricOverride
 
     rt = make_rt(cfg, tmp_path, now)
-    rt.board.data.rubrics["analysis"] = RubricOverride(mode="auto", enabled=True)
+    assert all(r.mode == "auto" for r in rt.rubrics().values())
     rt.board.data.rubrics["tool"] = RubricOverride(mode="approve")
-    r = rt.rubrics()
-    assert r["analysis"].mode == "approve" and r["tool"].mode == "approve"
+    assert rt.rubrics()["tool"].mode == "approve"
+
+
+# --- решение 58: пост об изменении рейтинга ----------------------------------------------------------------
+def test_ratings_change_sentences() -> None:
+    from vibe_stack.ratings_post import describe
+
+    assert describe(["A", "B", "C"], ["A", "B", "C"]) == []
+    assert describe(["A", "B", "C"], ["B", "A", "C"]) == ["B — новый лидер", "A опустилась на 2-е место"]
+    assert describe(["A", "B", "C"], ["A", "D", "B"]) == ["D вошла в топ-3 на 2-е место", "B опустилась на 3-е место",
+                                                          "C выбыла из топ-3"]
+    assert describe(["A", "B", "C"], ["A", "C", "B"]) == ["C поднялась на 2-е место", "B опустилась на 3-е место"]
+
+
+def test_ratings_post_only_on_place_changes_and_once(cfg, tmp_path, now) -> None:
+    rt = make_rt(cfg, tmp_path, now)
+    video = lambda top, scores: FixtureLeaderboard({  # noqa: E731
+        "key": "arena_video", "label": "Видео", "date": "2026-10-06", "top": top, "scores": scores,
+        "data_url": "https://example.org/arena"})
+    run_pin(rt, [arena(["A", "B", "C"]), video(["V1", "V2", "V3"], ["1516", "1513", "1493"])])
+    # изменились только очки — поста нет
+    s = run_pin(rt, [arena(["A", "B", "C"]), video(["V1", "V2", "V3"], ["1520", "1510", "1490"])])
+    assert s["ratings_post"]["status"] == "no_changes" and len(rt.tg.sent) == 1
+    # новый участник в видео — один пост, без картинки, одним предложением на рейтинг
+    s = run_pin(rt, [arena(["A", "B", "C"]), video(["V1", "V4", "V2"], ["1520", "1515", "1510"])])
+    assert s["ratings_post"] == {"status": "published", "changed": ["arena_video"]}
+    post = rt.tg.sent[-1][1]
+    assert post.startswith("🏆 <b>Рейтинг моделей изменился</b>\n\n<b>Видео:</b> V4 вошла в топ-3 на 2-е место, "
+                           "V2 опустилась на 3-е место, V3 выбыла из топ-3.")
+    assert post.endswith("#рейтинг") and "<b>Текст:</b>" not in post
+    assert rt.state.published_since(rt.today())[-1].rubric == "ratings"

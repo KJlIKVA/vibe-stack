@@ -59,7 +59,8 @@ def compute_stats(rt: Runtime) -> tuple[dict[str, Any], list[dict[str, Any]], li
     for r in rejected:
         for code in json.loads(r["reasons"]) or ["other"]:
             by_reason[reason_label(code)] += 1
-    published = [p for p in rt.state.published_since(start) if p.rubric != "weekly" and p.local_date <= end]
+    published = [p for p in rt.state.published_since(start) if p.rubric not in ("weekly", "ratings")
+                 and p.local_date <= end]
     stats = {
         "period": f"{start.isoformat()} — {end.isoformat()}",
         "просмотрено": len(seen_ids),

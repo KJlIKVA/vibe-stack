@@ -113,7 +113,7 @@ def test_rubric_and_source_overrides(board) -> None:
     b, _ = board
     b.setup()
     rubrics = b.rubric_overrides()
-    assert rubrics["analysis"].mode == "approve" and rubrics["tool"].mode == "auto"
+    assert rubrics["analysis"].mode == "auto" and rubrics["tool"].mode == "auto"  # всё автоматически (решение 58)
     sources = b.source_overrides()
     assert sources["openai-news"].whitelist is True
     assert sources["anthropic-news"].enabled is True and sources["simon-willison"].whitelist is False
