@@ -31,13 +31,13 @@ def test_create_pin_once_then_edit_only_on_change(cfg, tmp_path, now) -> None:
     rt = make_rt(cfg, tmp_path, now)
     s = run_pin(rt, [arena(["A", "B", "C"])])
     assert s["status"] == "created_and_pinned" and rt.tg.pinned == [-1]
-    assert "<b>Текст</b>\n1. A\n2. B\n3. C" in rt.tg.sent[0][1]
+    assert "<b>Текст</b>\n🥇 A\n🥈 B\n🥉 C" in rt.tg.sent[0][1]
     assert run_pin(rt, [arena(["A", "B", "C"])])["status"] == "unchanged"
     s = run_pin(rt, [arena(["B", "A", "C"], date="2026-10-07")])
     assert s["status"] == "edited" and len(rt.tg.pinned) == 1
-    assert "1. B\n2. A" in rt.tg.edited[-1][1]
+    assert "🥇 B\n🥈 A" in rt.tg.edited[-1][1]
     # места сменились — кроме правки закрепа, в канал вышел короткий пост об изменении (решение 58)
-    assert len(rt.tg.sent) == 2 and "<b>Текст:</b> B — новый лидер, A опустилась на 2-е место." in rt.tg.sent[1][1]
+    assert len(rt.tg.sent) == 2 and "<b>Текст:</b> B — новый лидер, A опустилась на 🥈 место." in rt.tg.sent[1][1]
 
 
 def test_failure_keeps_previous_date(cfg, tmp_path, now) -> None:
@@ -51,7 +51,7 @@ def test_failure_keeps_previous_date(cfg, tmp_path, now) -> None:
     s = run_pin(rt, [arena([], fail=True), video])
     assert s["status"] == "edited"
     text = rt.tg.edited[-1][1]
-    assert "1. A\n2. B\n3. C" in text and "1. V1" in text
+    assert "🥇 A\n🥈 B\n🥉 C" in text and "🥇 V1" in text
 
 
 def test_no_permitted_source_means_no_rating_block(cfg, tmp_path, now) -> None:
@@ -71,8 +71,8 @@ def test_navigator_layout(cfg, tmp_path, now) -> None:
     assert rt.tg.sent[0][1] == (
         "📌 <b>Vibe Stack — навигатор</b>\n\n"
         '🏆 <b><a href="https://example.org/arena">Топ моделей</a></b>\n\n'
-        "<b>Текст</b>\n1. A\n2. B\n3. C\n\n"
-        "<b>Видео</b>\n1. V1\n2. V2\n3. V3")
+        "<b>Текст</b>\n🥇 A\n🥈 B\n🥉 C\n\n"
+        "<b>Видео</b>\n🥇 V1\n🥈 V2\n🥉 V3")
 
 
 def test_navigator_shows_scores(cfg, tmp_path, now) -> None:
@@ -80,7 +80,7 @@ def test_navigator_shows_scores(cfg, tmp_path, now) -> None:
     board = FixtureLeaderboard({"key": "arena_text", "label": "Текст", "date": "2026-10-02", "top": ["A", "B", "C"],
                                 "scores": ["1525", "1505", "1504"], "data_url": "https://example.org/arena"})
     run_pin(rt, [board])
-    assert "<b>Текст</b>\n1. A — 1525\n2. B — 1505\n3. C — 1504" in rt.tg.sent[0][1]
+    assert "<b>Текст</b>\n🥇 A — 1525\n🥈 B — 1505\n🥉 C — 1504" in rt.tg.sent[0][1]
 
 
 def test_deleted_pin_is_recreated(cfg, tmp_path, now) -> None:
@@ -166,8 +166,8 @@ def test_ratings_post_layout() -> None:
                   (snap("v", "Видео", ["V1", "V2", "V3"]), snap("v", "Видео", ["V1", "V3", "V2"]))],
                  "https://example.org/arena")
     assert text == ("🏆 <b>Рейтинг моделей изменился</b>\n\n"
-                    "<b>Кодинг:</b> B — новый лидер, A опустилась на 2-е место.\n\n"
-                    "<b>Видео:</b> V3 поднялась на 2-е место, V2 опустилась на 3-е место.\n\n"
+                    "<b>Кодинг:</b> B — новый лидер, A опустилась на 🥈 место.\n\n"
+                    "<b>Видео:</b> V3 поднялась на 🥈 место, V2 опустилась на 🥉 место.\n\n"
                     'Сверено с <a href="https://example.org/arena">первоисточником</a> ✅')
 
 
@@ -175,10 +175,10 @@ def test_ratings_change_sentences() -> None:
     from vibe_stack.ratings_post import describe
 
     assert describe(["A", "B", "C"], ["A", "B", "C"]) == []
-    assert describe(["A", "B", "C"], ["B", "A", "C"]) == ["B — новый лидер", "A опустилась на 2-е место"]
-    assert describe(["A", "B", "C"], ["A", "D", "B"]) == ["D вошла в топ-3 на 2-е место", "B опустилась на 3-е место",
+    assert describe(["A", "B", "C"], ["B", "A", "C"]) == ["B — новый лидер", "A опустилась на 🥈 место"]
+    assert describe(["A", "B", "C"], ["A", "D", "B"]) == ["D вошла в топ-3 на 🥈 место", "B опустилась на 🥉 место",
                                                           "C выбыла из топ-3"]
-    assert describe(["A", "B", "C"], ["A", "C", "B"]) == ["C поднялась на 2-е место", "B опустилась на 3-е место"]
+    assert describe(["A", "B", "C"], ["A", "C", "B"]) == ["C поднялась на 🥈 место", "B опустилась на 🥉 место"]
 
 
 def test_ratings_post_only_on_place_changes_and_once(cfg, tmp_path, now) -> None:
@@ -194,7 +194,7 @@ def test_ratings_post_only_on_place_changes_and_once(cfg, tmp_path, now) -> None
     s = run_pin(rt, [arena(["A", "B", "C"]), video(["V1", "V4", "V2"], ["1520", "1515", "1510"])])
     assert s["ratings_post"] == {"status": "published", "changed": ["arena_video"]}
     post = rt.tg.sent[-1][1]
-    assert post.startswith("🏆 <b>Рейтинг моделей изменился</b>\n\n<b>Видео:</b> V4 вошла в топ-3 на 2-е место, "
-                           "V2 опустилась на 3-е место, V3 выбыла из топ-3.")
+    assert post.startswith("🏆 <b>Рейтинг моделей изменился</b>\n\n<b>Видео:</b> V4 вошла в топ-3 на 🥈 место, "
+                           "V2 опустилась на 🥉 место, V3 выбыла из топ-3.")
     assert post.endswith("первоисточником</a> ✅") and "#" not in post and "<b>Текст:</b>" not in post
     assert rt.state.published_since(rt.today())[-1].rubric == "ratings"

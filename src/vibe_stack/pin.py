@@ -20,6 +20,7 @@ from .telegram import TelegramError
 
 log = logging.getLogger(__name__)
 
+MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}  # места в навигаторе и в посте об изменении рейтинга (решение 58)
 NAV_TITLE = "📌 Vibe Stack — навигатор"  # так начинается текст навигатора (getChat отдаёт текст без разметки)
 DISCLAIMER_FULL = ("Это разные взгляды, а не истина: Arena отражает предпочтения людей, "
                    "индекс Artificial Analysis считается по собственным тестам.")
@@ -74,7 +75,7 @@ def render(rt: Runtime, snaps: dict[str, Snapshot], adapters: list[Any]) -> str:
         for s in shown:
             lines += ["", f"<b>{html.escape(s.label)}</b>"]
             scores = s.scores if len(s.scores) == len(s.top) else [""] * len(s.top)
-            lines += [f"{i}. {html.escape(m)}" + (f" — {html.escape(sc)}" if sc else "")
+            lines += [f"{MEDALS.get(i, f'{i}.')} {html.escape(m)}" + (f" — {html.escape(sc)}" if sc else "")
                       for i, (m, sc) in enumerate(zip(s.top[:3], scores[:3], strict=True), 1)]
         others = [s for s in shown if not s.key.startswith("arena")]
         if others:  # у Artificial Analysis подпись обязательна по их условиям — она остаётся текстом

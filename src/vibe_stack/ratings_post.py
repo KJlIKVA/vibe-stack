@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 from .footer import CHECK
-from .pin import Snapshot
+from .pin import MEDALS, Snapshot
 from .runtime import Runtime
 from .telegram import TelegramError
 from .urls import host_of
@@ -37,11 +37,11 @@ def describe(old: list[str], new: list[str]) -> list[str]:
         if place == 1:
             parts.append(f"{name} — новый лидер")
         elif before is None:
-            parts.append(f"{name} вошла в топ-3 на {place}-е место")
+            parts.append(f"{name} вошла в топ-3 на {MEDALS[place]} место")
         elif place < before:
-            parts.append(f"{name} поднялась на {place}-е место")
+            parts.append(f"{name} поднялась на {MEDALS[place]} место")
         else:
-            parts.append(f"{name} опустилась на {place}-е место")
+            parts.append(f"{name} опустилась на {MEDALS[place]} место")
     parts += [f"{html.escape(m)} выбыла из топ-3" for m in old[:3] if m not in new[:3]]
     return parts
 
