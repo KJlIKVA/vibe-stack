@@ -4,8 +4,8 @@ from vibe_stack.lint import lint_post, visible_length
 
 SRC = "https://github.com/acme/tool"
 GOOD = (
-    "🛠 <b>tool: что это</b>\n\nСуть.\n\n<b>Зачем это вам:</b> экономит время.\n"
-    '<a href="https://github.com/acme/tool">Первоисточник</a>\n✅ Сверено с первоисточником · #инструмент'
+    "🛠 <b>tool: что это</b>\n\nСуть.\n\n<b>Зачем это вам:</b> экономит время.\n\n"
+    'Сверено с <a href="https://github.com/acme/tool">первоисточником</a> ✅\n\n#инструмент'
 )
 
 
@@ -42,7 +42,7 @@ def test_curl_bash_forbidden() -> None:
 
 
 def test_verified_mark_and_forbidden_mark() -> None:
-    assert "missing_verified_mark" in lint(GOOD.replace("✅ Сверено с первоисточником · ", ""))
+    assert "missing_verified_mark" in lint(GOOD.replace("Сверено с ", ""))
     assert any(e.startswith("forbidden_mark") for e in lint(GOOD.replace("Суть.", "Запущено у нас.")))
 
 

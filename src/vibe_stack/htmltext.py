@@ -99,3 +99,77 @@ def published_from_meta(meta: dict[str, str]) -> str | None:
         if meta.get(key):
             return meta[key]
     return None
+
+
+# --- картинки ---------------------------------------------------------------------------
+_DIMS_RE = re.compile(r"-(\d{2,5})x(\d{2,5})\.(?:png|jpe?g|webp|gif)$", re.IGNORECASE)
+_SKIP_ALT = ("logo", "icon", "avatar", "логотип", "иконк")
+_SKIP_EXT = (".svg", ".ico")
+
+
+class _Images(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.meta: dict[str, str] = {}
+        self.imgs: list[tuple[str, str]] = []  # (src, alt)
+        self.skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        a = {k.lower(): (v or "") for k, v in attrs}
+        if tag == "meta":
+            key = (a.get("property") or a.get("name") or "").lower()
+            if key in ("og:image", "og:image:url", "og:image:secure_url", "twitter:image") and a.get("content"):
+                self.meta.setdefault(key, a["content"])
+        elif tag in ("nav", "footer", "header", "aside"):
+            self.skip_depth += 1
+        elif tag == "img" and not self.skip_depth:
+            src = a.get("src") or a.get("data-src") or ""
+            if src:
+                self.imgs.append((src, a.get("alt", "")))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("nav", "footer", "header", "aside") and self.skip_depth:
+            self.skip_depth -= 1
+
+
+def _image_url(src: str, base_url: str) -> str | None:
+    """Абсолютный https-адрес картинки. Next.js отдаёт картинки через /_next/image?url=… — берём исходный адрес."""
+    from urllib.parse import parse_qs, urljoin, urlsplit
+
+    url = urljoin(base_url, src.strip())
+    parts = urlsplit(url)
+    if parts.path.endswith("/_next/image"):
+        inner = parse_qs(parts.query).get("url", [""])[0]
+        if not inner:
+            return None
+        url = urljoin(base_url, inner)
+        parts = urlsplit(url)
+    if parts.scheme != "https" or not parts.netloc or parts.path.lower().endswith(_SKIP_EXT):
+        return None
+    if (m := _DIMS_RE.search(parts.path)) and int(m.group(1)) < 600:
+        return None  # маленькая картинка (размер в имени файла, как у CDN Sanity): логотип, иконка
+    return url
+
+
+def page_images(html: str, base_url: str, limit: int = 12) -> tuple[str | None, list[str]]:
+    """(главная картинка страницы — og:image/twitter:image, картинки статьи по порядку без логотипов)."""
+    p = _Images()
+    try:
+        p.feed(html)
+        p.close()
+    except Exception:
+        pass
+    main = None
+    for key in ("og:image:secure_url", "og:image", "og:image:url", "twitter:image"):
+        if p.meta.get(key) and (main := _image_url(p.meta[key], base_url)):
+            break
+    figures: list[str] = []
+    for src, alt in p.imgs:
+        if any(w in alt.lower() for w in _SKIP_ALT):
+            continue
+        url = _image_url(src, base_url)
+        if url and url != main and url not in figures:
+            figures.append(url)
+        if len(figures) >= limit:
+            break
+    return main, figures

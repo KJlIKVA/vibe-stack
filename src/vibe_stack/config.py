@@ -102,6 +102,14 @@ class Collect(BaseModel):
 class Urgent(BaseModel):
     max_item_age_hours: int = 24
     events: list[str] = Field(default_factory=list)
+    new_model_max_chars: int = 900  # пост о новой модели: цена и сравнение не помещаются в 500 знаков
+
+
+class ImagesConfig(BaseModel):
+    """Картинка поста — большое превью над текстом (решение 47)."""
+
+    enabled: bool = True
+    max_figures: int = 8  # сколько картинок статьи показывать модели, чтобы выбрать таблицу бенчмарков/цен
 
 
 class Fetch(BaseModel):
@@ -196,6 +204,7 @@ class Config(BaseModel):
     planner: Planner = Field(default_factory=Planner)
     collect: Collect = Field(default_factory=Collect)
     urgent: Urgent = Field(default_factory=Urgent)
+    images: ImagesConfig = Field(default_factory=ImagesConfig)
     fetch: Fetch = Field(default_factory=Fetch)
     dedup: Dedup = Field(default_factory=Dedup)
     prefilter: Prefilter = Field(default_factory=Prefilter)

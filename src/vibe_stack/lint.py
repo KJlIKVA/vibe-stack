@@ -11,7 +11,7 @@ from .guards import has_pipe_to_shell
 from .urls import canonical_url, host_of, same_site
 
 ALLOWED_TAGS = {"b", "i", "a", "code"}
-VERIFIED_MARK = "✅ Сверено с первоисточником"
+VERIFIED_MARK = "Сверено с первоисточником ✅"  # подвал ставит код (footer.py)
 FORBIDDEN_MARKS = ("Запущено",)
 HYPE_WORDS = ("революци", "game changer", "game-changer", "невероятн")
 STANDARD_RUBRICS = {"tool", "skill_mcp", "trick", "case"}

@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from .config import Fetch, env
-from .htmltext import html_to_text, published_from_meta
+from .htmltext import html_to_text, page_images, published_from_meta
 from .models import FetchedDoc
 from .timeutil import Clock
 from .urls import canonical_url, github_repo, host_of
@@ -111,9 +111,11 @@ class HttpFetcher:
         if ctype and not ctype.startswith(TEXT_TYPES):
             return FetchedDoc(url=url, final_url=final_url, ok=False, http_status=status,
                               fetched_at=now, error=f"тип {ctype} не поддерживается")
+        image, figures = None, []
         if "html" in ctype or raw.lstrip()[:200].lower().startswith(("<!doctype html", "<html")):
             title, text, meta = html_to_text(raw)
             published = published_from_meta(meta)
+            image, figures = page_images(raw, final_url)
         else:
             title, text, published = "", raw, None
         header = [f"[страница] {url}"]
@@ -126,6 +128,7 @@ class HttpFetcher:
             url=url, final_url=final_url, ok=bool(text.strip()), http_status=status,
             fetched_at=now, title=title, published_meta=published,
             text=truncate(body, self.cfg.max_doc_chars), error=None if text.strip() else "пустая страница",
+            image=image, figures=figures,
         )
 
     # --- GitHub ---------------------------------------------------------------------------
@@ -171,6 +174,7 @@ class HttpFetcher:
             title=meta.get("full_name") or repo, published_meta=meta.get("created_at"),
             updated_meta=max(filter(None, [meta.get("pushed_at"), (latest or {}).get("published_at")]), default=None),
             text=truncate(text, self.cfg.max_doc_chars), error=None if readme else "нет README",
+            image=github_card(meta.get("full_name") or repo),
         )
 
     def _github_release(self, url: str, repo: str, tag: str) -> FetchedDoc:
@@ -193,6 +197,7 @@ class HttpFetcher:
             url=url, final_url=rel.get("html_url") or url, ok=bool(body.strip()), http_status=200, fetched_at=now,
             title=f"{repo} {rel.get('tag_name')}", published_meta=rel.get("published_at"),
             text=truncate(text, self.cfg.max_doc_chars), error=None if body.strip() else "пустые release notes",
+            image=github_card(repo),
         )
 
 
@@ -219,9 +224,15 @@ class FixtureFetcher:
         return FetchedDoc(
             url=url, final_url=url, ok=ok, http_status=status, fetched_at=now, title=spec.get("title", ""),
             published_meta=spec.get("published_meta"), updated_meta=spec.get("updated_meta"),
+            image=spec.get("image"), figures=list(spec.get("figures") or []),
             text=truncate(f"[страница] {url}\n\n{text}", self.max_chars),
             error=None if ok else (f"HTTP {status}" if status >= 400 else "пустая страница"),
         )
+
+
+def github_card(repo: str) -> str:
+    """Карточка репозитория, которую GitHub сам рисует для превью (название, описание, звёзды)."""
+    return f"https://opengraph.githubassets.com/1/{repo}"
 
 
 def domain_of(url: str) -> str:

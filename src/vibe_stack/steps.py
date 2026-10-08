@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from . import prompts
+from . import footer, prompts
 from .config import Config, Rubric
 from .guards import affiliate_reason, domain_in, find_injection, only_unsafe_install
 from .lint import lint_post
@@ -163,25 +163,30 @@ class WriteOutcome:
 
 
 def write(rt: Runtime, c: Candidate, rubric_key: str, rubric: Rubric, approved: list[str],
-          mode: str, extra: dict[str, str] | None = None) -> WriteOutcome:
-    """Текст C + lint; при ошибках линтера — одна попытка исправить. extra — плейсхолдеры надстройки ({{термин}})."""
+          mode: str, extra: dict[str, str] | None = None, notes: str | None = None,
+          max_chars: int | None = None) -> WriteOutcome:
+    """Текст C + подвал кода + lint; при ошибках линтера — одна попытка исправить.
+    extra — плейсхолдеры надстройки ({{термин}}); notes — блок решений владельца (например, о новой модели)."""
     meta = {"category": rubric_key, "url": c.url, "title": c.title, "mode": mode}
-    prompt = prompts.write_prompt(approved, meta, rubric.overlay, rubric.emoji, rubric.hashtag, extra)
+    prompt = prompts.write_prompt(approved, meta, rubric.overlay, rubric.emoji, rubric.hashtag, extra, notes)
     template = prompts.load(prompts.OVERLAY_FILES[rubric.overlay])
     # заголовок — тоже данные из интернета: числа в посте только из подтверждённых утверждений
     allowed = "\n".join(approved)
 
+    def finish(text: str) -> str:
+        return footer.apply(text, source_url=c.url, rubric=rubric, template=template)
+
     def check(text: str) -> list[str]:
-        return lint_post(text, rubric=rubric_key, max_chars=rubric.max_chars, source_url=c.url,
+        return lint_post(text, rubric=rubric_key, max_chars=max_chars or rubric.max_chars, source_url=c.url,
                          allowed_text=allowed, template_text=template)
 
-    html = rt.llm.text("write", prompt, ctx_id=c.id)
+    html = finish(rt.llm.text("write", prompt, ctx_id=c.id))
     errors = check(html)
     if errors:
         log.info("lint %s: %s — прошу исправить", c.id, errors)
         retry = (prompt + "\n\nПредыдущий вариант поста не прошёл автоматическую проверку: "
                  + ", ".join(errors) + "\n<previous_draft>\n" + prompts.neutralize(html) + "\n</previous_draft>\n"
                  "Исправь эти ошибки, соблюдая все правила выше, и верни только текст поста.")
-        html = rt.llm.text("write", retry, ctx_id=f"{c.id}#retry")
+        html = finish(rt.llm.text("write", retry, ctx_id=f"{c.id}#retry"))
         errors = check(html)
     return WriteOutcome(None if errors else html, errors)

@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
-from . import prompts
+from . import images, prompts
 from .board import BoardUnavailable
 from .config import Rubric
 from .llm import BudgetExceeded, LLMError
@@ -165,7 +165,10 @@ def _process(rt: Runtime, c: Candidate, rubric: Rubric, limit: int) -> str:
         rt.decision(CONTOUR, c, "verify", "rejected", v.reasons)
         rt.state.mark_seen(_ukeys(c), c.id, "verify_fail", now)
         return "rejected"
-    w = write(rt, c, "urgent", rubric, v.approved, mode="urgent")
+    new_model = tri.event == "new_model"  # цена и сравнение с другими моделями — отдельным блоком (решение 47)
+    w = write(rt, c, "urgent", rubric, v.approved, mode="urgent",
+              notes=prompts.load("model_release") if new_model else None,
+              max_chars=rt.cfg.urgent.new_model_max_chars if new_model else None)
     if w.html is None:
         rt.decision(CONTOUR, c, "lint", "rejected", ["lint:" + ";".join(w.errors)])
         rt.state.mark_seen(_ukeys(c), c.id, "lint_fail", now)
@@ -183,6 +186,7 @@ def _process(rt: Runtime, c: Candidate, rubric: Rubric, limit: int) -> str:
     ref = rt.board.add_post(post)
     post = post.model_copy(update={"ref": ref})
     rt.state.mark_seen(_ukeys(c), c.id, "processed", now)
+    images.remember(rt, c.id, images.choose(rt, c, doc, new_model=new_model))
     if needs_approval or not can_publish:
         rt.state.mark_seen(c.keys, c.id, "queued", now)
         if needs_approval:

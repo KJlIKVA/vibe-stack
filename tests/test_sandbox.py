@@ -252,8 +252,9 @@ def test_successful_run_adds_mark_by_code(cfg, tmp_path, now) -> None:
     assert run_publish(rt)["status"] == "published"
     text = rt.tg.sent[0][1]
     lines = text.split("\n")
-    assert lines[-2] == "🧪 Запущено в песочнице: установка и <code>toolx --help</code>"
-    assert lines[-1].startswith("✅ Сверено")
+    assert lines[-4] == "🧪 Запущено в песочнице: установка и <code>toolx --help</code>"
+    assert lines[-3] == 'Сверено с <a href="https://github.com/acme/toolx">первоисточником</a> ✅'
+    assert lines[-2:] == ["", "#инструмент"]
     assert rt.board.get(ref).html == text  # в Notion — то, что ушло в канал
     assert rt.state.sandbox_row("c1")["status"] == "ok"  # результат не затирается
 

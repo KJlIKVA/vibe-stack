@@ -17,7 +17,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from .config import LLMConfig, env
-from .models import HARD_STOPS, GlossaryResult, ScoreResult, TriageResult, VerifyResult
+from .models import HARD_STOPS, GlossaryResult, ImagePick, ScoreResult, TriageResult, VerifyResult
 from .storage import State
 from .timeutil import Clock, local_date
 
@@ -76,6 +76,10 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         "reason": _STR,
         "claims": _STR_LIST,
     }),
+    "image": _obj({
+        "index": {"type": "integer"},
+        "kind": {"type": "string", "enum": ["benchmark", "pricing", "none"]},
+    }),
     "glossary": _obj({
         "id": _STR,
         "term": _STR,
@@ -87,7 +91,8 @@ SCHEMAS: dict[str, dict[str, Any]] = {
     }),
 }
 RESULT_MODELS: dict[str, type[BaseModel]] = {"score": ScoreResult, "verify": VerifyResult, "triage": TriageResult,
-                                             "glossary": GlossaryResult}
+                                             "glossary": GlossaryResult, "image": ImagePick}
+IMAGE_TOKENS = 1000  # с запасом на картинку при detail=low (реально ~85–100 токенов)
 
 
 class Usage(BaseModel):
@@ -114,9 +119,10 @@ class LLM:
 
     # --- транспорт ---------------------------------------------------------------------------
     def _call(
-        self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str
+        self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str, images: list[str] | None = None
     ) -> tuple[str, Usage, bool]:
-        """(текст, расход, завершён ли ответ). Для незавершённого ответа текст — причина."""
+        """(текст, расход, завершён ли ответ). Для незавершённого ответа текст — причина.
+        images — адреса картинок к промпту (модель смотрит их в низком разрешении)."""
         raise NotImplementedError
 
     def _classify(self, exc: Exception, step: str, prompt: str) -> tuple[bool, Usage]:
@@ -149,11 +155,12 @@ class LLM:
                 raise BudgetExceeded(f"дневной лимит токенов {model}: {limit:,} — использовано {used:,}, "
                                      f"вызов может занять ещё до {reserve_tokens:,}")
 
-    def reserve_tokens(self, step: str, prompt: str) -> int:
-        """Верхняя оценка токенов вызова: вход ≈ байты UTF-8 / 2 (с запасом) + максимум выхода шага."""
-        return len(prompt.encode("utf-8")) // 2 + self.cfg.steps[step].max_output_tokens
+    def reserve_tokens(self, step: str, prompt: str, images: int = 0) -> int:
+        """Верхняя оценка токенов вызова: вход ≈ байты UTF-8 / 2 (с запасом) + картинки + максимум выхода шага."""
+        return len(prompt.encode("utf-8")) // 2 + images * IMAGE_TOKENS + self.cfg.steps[step].max_output_tokens
 
-    def _invoke(self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str) -> str:
+    def _invoke(self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str,
+                images: list[str] | None = None) -> str:
         step_cfg = self.cfg.steps.get(step)
         if step_cfg is None:
             raise LLMError(f"нет настроек шага llm.steps.{step}")
@@ -161,11 +168,11 @@ class LLM:
             raise LLMError(f"для модели {step_cfg.model} нет цены в llm.prices_per_1m — бюджет не посчитать")
         for attempt in range(self.cfg.max_attempts):
             # каждая попытка — отдельный вызов в лимите и бюджете
-            self.check_budget(step_cfg.model, self.reserve_tokens(step, prompt))
+            self.check_budget(step_cfg.model, self.reserve_tokens(step, prompt, len(images or [])))
             now = self.clock()
             day = local_date(now, self.tz)
             try:
-                text, usage, completed = self._call(step, prompt, schema, ctx_id)
+                text, usage, completed = self._call(step, prompt, schema, ctx_id, images)
             except Exception as e:
                 retry, estimate = self._classify(e, step, prompt)
                 self.state.record_llm_call(run_id=self.run_id, step=step, model=step_cfg.model, now=now, day=day,
@@ -188,8 +195,8 @@ class LLM:
         raise AssertionError("unreachable")
 
     # --- публичные методы ---------------------------------------------------------------------------
-    def json(self, step: str, prompt: str, ctx_id: str) -> Any:
-        text = self._invoke(step, prompt, SCHEMAS[step], ctx_id)
+    def json(self, step: str, prompt: str, ctx_id: str, images: list[str] | None = None) -> Any:
+        text = self._invoke(step, prompt, SCHEMAS[step], ctx_id, images)
         try:
             data = json.loads(_strip_fences(text))
             return RESULT_MODELS[step].model_validate(data)
@@ -236,14 +243,20 @@ class OpenAILLM(LLM):
         return False, Usage()
 
     def _call(
-        self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str
+        self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str, images: list[str] | None = None
     ) -> tuple[str, Usage, bool]:
         sc = self.cfg.steps[step]
         if sc.model not in self.cfg.prices_per_1m:
             raise LLMError(f"для модели {sc.model} нет цены в llm.prices_per_1m — бюджет не посчитать")
+        content: Any = prompt
+        if images:
+            content = [{"role": "user", "content": [
+                {"type": "input_text", "text": prompt},
+                *({"type": "input_image", "image_url": u, "detail": "low"} for u in images),
+            ]}]
         kwargs: dict[str, Any] = {
             "model": sc.model,
-            "input": prompt,
+            "input": content,
             "reasoning": {"effort": sc.effort},
             "max_output_tokens": sc.max_output_tokens,
             "store": False,
@@ -266,7 +279,8 @@ class OpenAILLM(LLM):
 class NoLLM(LLM):
     """Dry-run без OPENAI_API_KEY: всё до вызова модели работает, сам вызов — понятная ошибка."""
 
-    def _invoke(self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str) -> str:
+    def _invoke(self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str,
+                images: list[str] | None = None) -> str:
         raise LLMError("OPENAI_API_KEY не задан — dry-run остановлен перед вызовом модели")
 
 
@@ -281,16 +295,19 @@ class FakeLLM(LLM):
         self.cost_per_call = cost_per_call
         self.output_tokens = 0  # сколько «выхода» записывать в журнал за вызов (для тестов лимита токенов)
         self.calls: list[tuple[str, str, str]] = []
+        self.images: dict[str, list[str]] = {}  # ctx_id → картинки, переданные в вызов
 
     def cost(self, model: str, u: Usage) -> float:
         return self.cost_per_call
 
-    def _invoke(self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str) -> str:
+    def _invoke(self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str,
+                images: list[str] | None = None) -> str:
         step_cfg = self.cfg.steps.get(step)
         model = step_cfg.model if step_cfg else "fake"
-        self.check_budget(model, self.reserve_tokens(step, prompt) if step_cfg else 0)
+        self.check_budget(model, self.reserve_tokens(step, prompt, len(images or [])) if step_cfg else 0)
         now = self.clock()
         self.calls.append((step, ctx_id, prompt))
+        self.images[ctx_id] = list(images or [])
         key = (step, ctx_id)
         if key not in self.responses:
             self.state.record_llm_call(run_id=self.run_id, step=step, model=model, now=now,

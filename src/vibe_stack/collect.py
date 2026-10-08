@@ -7,7 +7,7 @@ import time
 from datetime import timedelta
 from typing import Any
 
-from . import dayplan, prompts, sandbox
+from . import dayplan, images, prompts, sandbox
 from .board import BoardUnavailable
 from .config import Rubric
 from .glossary import run_glossary
@@ -175,6 +175,7 @@ def process_candidate(rt: Runtime, c: Candidate, rubrics: dict[str, Rubric]) -> 
         html=w.html, verify=verify_json, candidate_id=c.id,
     ))
     rt.state.mark_seen(c.keys, c.id, "queued", rt.now())
+    images.remember(rt, c.id, doc.image)  # картинка поста — главная картинка первоисточника
     rt.write_out(f"posts/{c.id}.html", w.html)
     detail: dict[str, Any] = {"ref": ref}
     try:

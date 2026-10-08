@@ -80,12 +80,15 @@ class Telegram:
         raise last
 
     def send_message(self, chat_id: str, text: str, *, html: bool = True, preview: bool = True,
-                     preview_url: str | None = None) -> int:
+                     preview_url: str | None = None, image_url: str | None = None) -> int:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if html:
             payload["parse_mode"] = "HTML"
         if not preview:
             payload["link_preview_options"] = {"is_disabled": True}
+        elif image_url:
+            # картинка поста — большое превью над текстом (текст при этом до 4096 знаков, а не 1024 как у фото)
+            payload["link_preview_options"] = {"url": image_url, "prefer_large_media": True, "show_above_text": True}
         elif preview_url:
             # превью всегда строится по первоисточнику, а не по первой попавшейся ссылке в тексте
             payload["link_preview_options"] = {"url": preview_url}
@@ -115,13 +118,15 @@ class DryRunTelegram:
         self.edited: list[tuple[int, str]] = []
         self.pinned: list[int] = []
         self.texts: dict[int, str] = {}
+        self.images: dict[int, str | None] = {}
         self._next = -1
 
     def send_message(self, chat_id: str, text: str, *, html: bool = True, preview: bool = True,
-                     preview_url: str | None = None) -> int:
+                     preview_url: str | None = None, image_url: str | None = None) -> int:
         mid = self._next
         self._next -= 1
         self.sent.append((chat_id, text))
+        self.images[mid] = image_url
         self.texts[mid] = text
         (self.out / f"msg{-mid:03d}.html").write_text(text, encoding="utf-8")
         return mid

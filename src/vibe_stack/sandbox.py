@@ -335,7 +335,7 @@ def with_mark(rt: Any, post: PostRecord) -> str:
     if row is None or row["status"] != "ok" or not COMMAND.fullmatch(row["command"] or ""):
         return post.html
     lines = post.html.rstrip("\n").split("\n")
-    at = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].startswith("✅")), len(lines))
+    at = next((i for i in range(len(lines) - 1, -1, -1) if "Сверено с" in lines[i]), len(lines))
     out = "\n".join([*lines[:at], mark_line(row), *lines[at:]])
     return out if len(out) <= 4096 else post.html
 

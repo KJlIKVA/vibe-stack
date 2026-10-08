@@ -86,3 +86,20 @@ def test_board_write_failure_is_not_retried_every_tick(cfg, tmp_path) -> None:
     keys = ["u|" + k for k in BASE.candidates[0].keys]
     assert state.seen_outcome(keys, NOW + timedelta(minutes=30), 60) == "board_error"
     assert state.seen_outcome(keys, NOW + timedelta(hours=7), 60) is None  # потом можно попробовать снова
+
+
+def test_new_model_post_gets_price_notes_longer_limit_and_chart(cfg, tmp_path) -> None:
+    """Решение 47: в посте о новой модели — цена и сравнение (блок владельца, до 900 знаков) и график из статьи."""
+    fx = copy.deepcopy(BASE)
+    cid = fx.candidates[0].id
+    doc = fx.documents[next(iter(fx.documents))]
+    doc["image"] = "https://openai.com/hero.png"
+    doc["figures"] = ["https://openai.com/team.png", "https://openai.com/evals.png"]
+    fx.llm[("image", f"{cid}#image")] = {"index": 1, "kind": "benchmark"}
+    res = run_scenario(fx, cfg, NOW, workdir=tmp_path)
+    assert res.ok, res.mismatches
+    write_prompt = next(p for step, _, p in res.llm_calls if step == "write")
+    assert "<новая_модель>" in write_prompt and "<b>Цена:</b>" in write_prompt
+    state = State(tmp_path / "state.db")
+    assert state.get(f"image:{cid}") == "https://openai.com/evals.png"
+    assert res.sent[0][1].rstrip().endswith("#срочно")

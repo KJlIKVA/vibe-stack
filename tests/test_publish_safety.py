@@ -26,7 +26,7 @@ class FlakyTG(DryRunTelegram):
         self.error = error
         self.attempts = 0
 
-    def send_message(self, chat_id, text, *, html=True, preview=True, preview_url=None) -> int:
+    def send_message(self, chat_id, text, *, html=True, preview=True, preview_url=None, image_url=None) -> int:
         self.attempts += 1
         if self.error:
             raise self.error

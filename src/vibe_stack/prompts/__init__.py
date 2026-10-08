@@ -93,7 +93,7 @@ def verify_prompt(claims: list[str], source_document: str, meta: dict[str, Any])
 
 
 def write_prompt(approved_claims: list[str], meta: dict[str, Any], overlay: str, emoji: str, hashtag: str,
-                 extra: dict[str, str] | None = None) -> str:
+                 extra: dict[str, str] | None = None, notes: str | None = None) -> str:
     base = render(load("write_C_base"), {
         "утверждения, прошедшие проверку": json.dumps(approved_claims, ensure_ascii=False),
     }, meta=meta)
@@ -102,7 +102,9 @@ def write_prompt(approved_claims: list[str], meta: dict[str, Any], overlay: str,
     if "{{эмодзи рубрики}}" in ov:
         values["эмодзи рубрики"] = emoji
     ov = ov.replace("#рубрика", hashtag)
-    return safety_preamble() + base.rstrip("\n") + "\n\n" + clarity_block() + render(ov, values)
+    # решения владельца — после шаблона ТЗ: уточняют его (например, длину и строки поста о новой модели)
+    notes_block = "\n\n" + notes.strip("\n") + "\n" if notes else ""
+    return safety_preamble() + base.rstrip("\n") + "\n\n" + clarity_block() + render(ov, values) + notes_block
 
 
 def weekly_prompt(stats: dict[str, Any], published: list[dict[str, Any]], rejected: list[dict[str, Any]]) -> str:

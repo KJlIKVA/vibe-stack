@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from . import dayplan, sandbox
+from . import dayplan, footer, images, prompts, sandbox
 from .board import BoardUnavailable
 from .lint import lint_post
 from .models import PostRecord, Status
@@ -142,6 +142,14 @@ def publish_post(rt: Runtime, post: PostRecord, *, slot: str | None, urgent: boo
     """Структурная проверка → маркер «Отправляется» → отправка → отметки в состоянии и на доске."""
     rubric = rt.cfg.rubrics.get(post.rubric)
     max_chars = rubric.max_chars if rubric else 900
+    if post.rubric == "urgent":  # пост о новой модели длиннее (цена и сравнение)
+        max_chars = max(max_chars, rt.cfg.urgent.new_model_max_chars)
+    original_html = post.html
+    if rubric and post.source_url:
+        # подвал собирает код: и у новых постов, и у написанных в старом формате (решение 47)
+        template = prompts.load(prompts.OVERLAY_FILES[rubric.overlay])
+        post = post.model_copy(update={"html": footer.apply(post.html, source_url=post.source_url, rubric=rubric,
+                                                             template=template)})
     # числа здесь не сверяем: текст мог поправить человек при одобрении
     errors = [e for e in lint_post(post.html, rubric=post.rubric, max_chars=max_chars, source_url=post.source_url)
               if not e.startswith("unverified_numbers")]
@@ -157,7 +165,8 @@ def publish_post(rt: Runtime, post: PostRecord, *, slot: str | None, urgent: boo
     ref = post.ref or f"tg-{short_id(post.source_url, post.title)}"
     text = sandbox.with_mark(rt, post)  # «🧪 Запущено…» ставит код и только после успешного запуска
     try:
-        mid: int | None = rt.tg.send_message(rt.channel_id, text, preview_url=post.source_url or None)
+        mid: int | None = rt.tg.send_message(rt.channel_id, text, preview_url=post.source_url or None,
+                                             image_url=images.for_post(rt, post))
     except TelegramError as e:
         if not e.uncertain:
             _safe_update(rt, post.ref, status=Status.ERROR, reject_reason=f"Telegram: {e}"[:500], published_at=None)
@@ -173,7 +182,7 @@ def publish_post(rt: Runtime, post: PostRecord, *, slot: str | None, urgent: boo
     rt.state.expire_sandbox(post.candidate_id, now)  # пост вышел — запускать его пакет больше незачем
     if mid is None:
         return False
-    extra = {"html": text} if text != post.html else {}
+    extra = {"html": text} if text != original_html else {}
     updated = _safe_update(rt, post.ref, status=Status.PUBLISHED, tg_message_id=mid, published_at=now, **extra)
     if post.ref and not updated:
         rt.notifier.notify(f"пост «{post.title[:80]}» вышел (id {mid}), но статус в Notion остался «Отправляется»")

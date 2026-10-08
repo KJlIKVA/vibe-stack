@@ -107,6 +107,15 @@ class FetchedDoc(BaseModel):
     updated_meta: str | None = None  # для репозиториев — последний push или релиз
     text: str = ""
     error: str | None = None
+    image: str | None = None  # главная картинка страницы (og:image) или карточка репозитория GitHub
+    figures: list[str] = Field(default_factory=list)  # картинки статьи по порядку (без логотипов и иконок)
+
+
+class ImagePick(BaseModel):
+    """Выбор картинки для поста о новой модели (шаг image): номер картинки статьи или -1."""
+
+    index: int
+    kind: Literal["benchmark", "pricing", "none"]
 
 
 class Scores(BaseModel):

@@ -36,6 +36,7 @@ llm:
     triage:  {model: gpt-5.6-terra, effort: low,    max_output_tokens: 6000}    # промпт U (срочное)
     weekly:  {model: gpt-5.6-terra, effort: medium, max_output_tokens: 8000}    # промпт D
     glossary: {model: gpt-5.6-terra, effort: low,   max_output_tokens: 6000}    # промпт G (слово дня)
+    image:   {model: gpt-5.6-terra, effort: low,    max_output_tokens: 3000}    # промпт I (картинка к посту о модели)
 
 limits:
   regular_per_day: 24         # потолок, а не план: выходит столько, сколько прошло отбор
@@ -71,7 +72,14 @@ collect:
 
 urgent:
   max_item_age_hours: 24
+  new_model_max_chars: 900    # пост о новой модели: цена и сравнение с другими моделями (решение 47)
   events: [new_model, major_release, pricing_or_limits_change, vulnerability]
+
+# Картинка поста — большое превью над текстом: главная картинка страницы (og:image) или карточка репозитория
+# GitHub. Для поста о новой модели модель выбирает среди картинок статьи таблицу бенчмарков или цен (решение 47).
+images:
+  enabled: true
+  max_figures: 8              # сколько картинок статьи показывать модели (detail=low, ~100 токенов каждая)
 
 fetch:
   timeout_s: 20
