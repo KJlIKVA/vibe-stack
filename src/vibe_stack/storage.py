@@ -333,7 +333,7 @@ class State:
     def sandbox_pending(self, limit: int, *, since: datetime, max_attempts: int) -> list[sqlite3.Row]:
         return self.db.execute(
             "SELECT * FROM sandbox WHERE status='pending' AND requested_at >= ? AND attempts < ? "
-            "ORDER BY requested_at LIMIT ?", (iso(since), max_attempts, limit)
+            "ORDER BY attempts, requested_at LIMIT ?", (iso(since), max_attempts, limit)
         ).fetchall()
 
     def finish_sandbox(self, candidate_id: str, version: str, *, ok: bool, stage: str, command: str, detail: str,

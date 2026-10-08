@@ -266,10 +266,15 @@ def sandbox_export(args: argparse.Namespace, cfg: Config) -> int:
 
 
 def sandbox_apply(args: argparse.Namespace, cfg: Config) -> int:
-    from .sandbox import apply_results
+    from .sandbox import apply_results, charge_lost_run
 
     setup_logging(None)
     state = State(args.state)
+    if not Path(args.results).exists():
+        charged = charge_lost_run(state, Path(args.requests), utc_now(), max_attempts=cfg.sandbox.max_attempts)
+        state.close()
+        print(f"песочница: результатов нет (job run потерян) — попытка засчитана заявке {charged or '—'}")
+        return 0
     counts = apply_results(state, Path(args.results), Path(args.requests), utc_now(),
                            max_attempts=cfg.sandbox.max_attempts)
     state.close()

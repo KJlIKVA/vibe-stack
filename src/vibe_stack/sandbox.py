@@ -141,7 +141,7 @@ class Registry:
         return r.text if r is not None and len(r.content) <= MAX_MANIFEST else None
 
     def _pypi(self, name: str, repo: str | None) -> Resolved | None:
-        if not PYPI_NAME.match(name):
+        if not PYPI_NAME.fullmatch(name):
             return None
         data = self._get(f"https://pypi.org/pypi/{quote(name)}/json")
         if not data:
@@ -154,7 +154,7 @@ class Registry:
             return None
         version = str(info.get("version") or "")
         wheels = [f for f in data.get("urls") or [] if f.get("packagetype") == "bdist_wheel" and not f.get("yanked")]
-        if not VERSION.match(version) or not wheels:
+        if not VERSION.fullmatch(version) or not wheels:
             return None  # без wheel пришлось бы выполнять setup.py при установке — так не делаем
         package = str(info.get("name") or name)
         origin = None
@@ -166,7 +166,7 @@ class Registry:
         return Resolved("pypi", package, version, [], origin)
 
     def _npm(self, name: str, repo: str | None) -> Resolved | None:
-        if not NPM_NAME.match(name):
+        if not NPM_NAME.fullmatch(name):
             return None
         data = self._get(f"https://registry.npmjs.org/{quote(name, safe='@')}/latest")
         if not data:
@@ -185,8 +185,8 @@ class Registry:
             bins = [b for b in raw_bin if isinstance(b, str)]
         else:
             bins = []
-        bins = [b for b in bins if BIN.match(b)][:5]
-        if not VERSION.match(version) or not bins:
+        bins = [b for b in bins if BIN.fullmatch(b)][:5]
+        if not VERSION.fullmatch(version) or not bins:
             return None  # библиотека без команды: запускать нечего
         origin = None
         if repo is not None:
@@ -240,14 +240,20 @@ class Registry:
                 pkg = json.loads(self._text(base + "package.json") or "null")
             except ValueError:
                 return set()
-            return {pkg["name"]} if isinstance(pkg, dict) and isinstance(pkg.get("name"), str) else set()
+            if not isinstance(pkg, dict) or not isinstance(pkg.get("name"), str) or pkg.get("private") is True:
+                return set()  # private: владелец в npm не публикует — пакет с таким именем не его
+            return {pkg["name"]}
         names: set[str] = set()
         if text := self._text(base + "pyproject.toml"):
             try:
                 t = tomllib.loads(text)
             except tomllib.TOMLDecodeError:
                 t = {}
-            for n in ((t.get("project") or {}).get("name"), ((t.get("tool") or {}).get("poetry") or {}).get("name")):
+            project, poetry = t.get("project") or {}, (t.get("tool") or {}).get("poetry") or {}
+            classifiers = [*(project.get("classifiers") or []), *(poetry.get("classifiers") or [])]
+            if any(str(c).startswith("Private ::") for c in classifiers):
+                return set()  # владелец в PyPI не публикует — пакет с таким именем не его
+            for n in (project.get("name"), poetry.get("name")):
                 if isinstance(n, str):
                     names.add(_norm(n))
         if not names and (text := self._text(base + "setup.cfg")):
@@ -298,6 +304,9 @@ def plan(rt: Any, *, candidate_id: str, url: str, rubric: str, doc_text: str) ->
         except (httpx.HTTPError, ValueError) as e:
             log.warning("песочница: реестр %s недоступен для %s: %s", eco, name, type(e).__name__)
             continue
+        if res and cfg.require_provenance and res.origin != "provenance":
+            log.info("песочница: %s %s без provenance — по настройке не запускаем", eco, name)
+            continue
         if res:
             rt.state.add_sandbox_request(candidate_id=candidate_id, repo=repo, ecosystem=res.ecosystem,
                                          package=res.package, version=res.version, bins=res.bins,
@@ -323,7 +332,7 @@ def mark_line(row: Any) -> str:
 def with_mark(rt: Any, post: PostRecord) -> str:
     """HTML поста с пометкой «Запущено», если запуск в песочнице прошёл. Пометку ставит только код."""
     row = rt.state.sandbox_row(post.candidate_id)
-    if row is None or row["status"] != "ok" or not COMMAND.match(row["command"] or ""):
+    if row is None or row["status"] != "ok" or not COMMAND.fullmatch(row["command"] or ""):
         return post.html
     lines = post.html.rstrip("\n").split("\n")
     at = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].startswith("✅")), len(lines))
@@ -365,12 +374,28 @@ def _load_list(path: Path) -> list[Any]:
 
 def command_ok(command: str, row: Any) -> bool:
     """Команда в пометке: формат «<bin> --help|--version», bin — из заявки (npm) или про этот пакет (PyPI)."""
-    if not COMMAND.match(command):
+    if not COMMAND.fullmatch(command):
         return False
     bin_name = command.split(" ", 1)[0]
     if row["ecosystem"] == "npm":
         return bin_name in json.loads(row["bins"] or "[]")
     return related(bin_name, row["package"])
+
+
+def charge_lost_run(state: Any, requests_path: Path, now: datetime, *, max_attempts: int) -> str | None:
+    """Результатов нет совсем (машину job run потеряли). Попытку получает первая заявка запуска: если машину
+    роняет она, после max_attempts она перестанет запускаться, а заявки с меньшим числом попыток пойдут первыми."""
+    for q in _load_list(requests_path):
+        if not (isinstance(q, dict) and isinstance(q.get("id"), str) and isinstance(q.get("version"), str)):
+            continue
+        row = state.sandbox_request(q["id"], q["version"])
+        if row is None or row["status"] != "pending":
+            continue
+        if state.sandbox_attempt(q["id"], q["version"]) >= max_attempts:
+            state.finish_sandbox(q["id"], q["version"], ok=False, stage="error", command="",
+                                 detail="запуск песочницы терялся на этой заявке", now=now)
+        return q["id"]
+    return None
 
 
 def apply_results(state: Any, results_path: Path, requests_path: Path, now: datetime, *,
@@ -398,8 +423,8 @@ def apply_results(state: Any, results_path: Path, requests_path: Path, now: date
             counts["failed"] += 1
             continue
         ok = r.get("ok") is True
-        stage = r.get("stage") if r.get("stage") in STAGES else "invalid"
-        command = str(r.get("command") or "")
+        stage = r.get("stage") if isinstance(r.get("stage"), str) and r["stage"] in STAGES else "invalid"
+        command = r.get("command") if isinstance(r.get("command"), str) else ""
         if not command_ok(command, row):
             ok, stage = (False, "invalid") if ok else (False, stage)
             command = ""

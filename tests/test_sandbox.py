@@ -173,6 +173,24 @@ def test_npm_provenance(source, v1, origin) -> None:
     assert (res.origin if res else None) == origin
 
 
+def test_private_manifest_does_not_vouch_for_a_registry_package() -> None:
+    # владелец не публикует пакет (private / «Private :: Do Not Upload») — чужой пакет с этим именем не принимаем
+    npm_private = {RAW + "package.json": json.dumps({"name": "@acme/toolx-cli", "private": True})}
+    assert registry({NPM_CLI: NPM_META, **npm_private}).resolve("npm", "@acme/toolx-cli", "acme/toolx") is None
+    py_private = {RAW + "pyproject.toml": '[project]\nname = "toolx"\nclassifiers = ["Private :: Do Not Upload"]\n'}
+    assert registry({PYPI_JSON: PYPI_TOOLX, **py_private}).resolve("pypi", "toolx", "acme/toolx") is None
+
+
+def test_require_provenance_setting(cfg, tmp_path, now) -> None:
+    rt = make_rt(cfg, tmp_path, now, registry({PYPI_JSON: PYPI_TOOLX, **PYPROJECT}))
+    cfg.sandbox.require_provenance = True
+    assert sandbox.plan(rt, candidate_id="c1", url="https://github.com/acme/toolx", rubric="tool",
+                        doc_text="pip install toolx") is None  # только манифест — не хватает
+    rt.registry = registry({PYPI_JSON: PYPI_TOOLX, PYPI_PROV: pypi_provenance("acme/toolx")})
+    assert sandbox.plan(rt, candidate_id="c1", url="https://github.com/acme/toolx", rubric="tool",
+                        doc_text="pip install toolx") == "pypi:toolx"
+
+
 def test_registry_redirects_only_within_the_same_host() -> None:
     reg = registry({"https://pypi.org/pypi/ToolX/json": ("redirect", PYPI_JSON), PYPI_JSON: PYPI_TOOLX, **PYPROJECT})
     assert reg.resolve("pypi", "ToolX", "acme/toolx").package == "toolx"
@@ -321,6 +339,35 @@ def test_mark_command_must_belong_to_the_package(cfg, tmp_path, now, eco, bins, 
     assert rt.state.sandbox_row("c1")["status"] == ("ok" if ok else "failed")
 
 
+def test_apply_survives_malformed_results(cfg, tmp_path, now) -> None:
+    rt = make_rt(cfg, tmp_path, now)
+    request(rt, now)
+    asked = write(tmp_path / "requests.json", ASKED)
+    res = write(tmp_path / "results.json", [
+        {"id": "c1", "version": "1.2.0", "ok": True, "stage": ["run"], "command": {"x": 1}},
+    ])
+    assert sandbox.apply_results(rt.state, res, asked, now, max_attempts=2)["failed"] == 1
+    rt.state.db.execute("UPDATE sandbox SET status='pending'")
+    res = write(tmp_path / "results.json", [
+        {"id": "c1", "version": "1.2.0", "ok": True, "stage": "run", "command": "toolx --help\n"}])
+    sandbox.apply_results(rt.state, res, asked, now, max_attempts=2)
+    assert rt.state.sandbox_row("c1")["command"] == ""  # перевод строки в <code> поста не попадёт
+
+
+def test_lost_run_charges_the_first_request(cfg, tmp_path, now) -> None:
+    rt = make_rt(cfg, tmp_path, now)
+    request(rt, now - timedelta(minutes=5))
+    rt.state.add_sandbox_request(candidate_id="c2", repo="a/b", ecosystem="pypi", package="b", version="1",
+                                 bins=[], now=now)
+    asked = write(tmp_path / "requests.json", [*ASKED, {"id": "c2", "version": "1"}])
+    assert sandbox.charge_lost_run(rt.state, asked, now, max_attempts=2) == "c1"
+    # у c1 попытка — следующий запуск начнёт с c2, а не снова с неё
+    out = sandbox.export_requests(rt.state, 10, now=now, max_age_hours=24, max_attempts=2)
+    assert [r["id"] for r in out] == ["c2", "c1"]
+    sandbox.charge_lost_run(rt.state, asked, now, max_attempts=2)
+    assert rt.state.sandbox_row("c1")["status"] == "failed"
+
+
 def test_interrupted_request_is_retried_then_failed(cfg, tmp_path, now) -> None:
     rt = make_rt(cfg, tmp_path, now)
     request(rt, now)
@@ -370,10 +417,10 @@ def test_runner_isolation_flags() -> None:
 
 def test_package_code_never_runs_with_network() -> None:
     py = sandbox_runner.install_steps({"ecosystem": "pypi", "package": "toolx", "version": "1.2.0"})
-    assert [net for _, _, net in py] == [False, True]
+    assert [net for _, _, net, _ in py] == [False, True]
     assert "--only-binary=:all:" in py[1][1]  # только wheel: setup.py не выполняется
     npm = sandbox_runner.install_steps({"ecosystem": "npm", "package": "x", "version": "1.0.0", "bins": ["x"]})
-    image, argv, _ = npm[0]
+    image, argv, _, _ = npm[0]
     assert image.startswith("node:24-slim@sha256:")  # npm 11
     # без install-скриптов и без git/URL/файловых зависимостей (git-зависимость = вложенный npm install)
     for flag in ("--ignore-scripts", "--allow-git=none", "--allow-remote=none", "--allow-file=none",
@@ -490,7 +537,7 @@ def test_runner_writes_results_after_each_request(monkeypatch, tmp_path) -> None
     out = tmp_path / "results.json"
     seen_before: list[str] = []
 
-    def fake_sandbox(req, *, npm_ok):
+    def fake_sandbox(req):
         seen_before.append(json.loads(out.read_text())[-1]["stage"])  # до запуска на диске — «started»
         if req["id"] == "c0":
             raise RuntimeError("boom")
@@ -506,7 +553,7 @@ def test_runner_writes_results_after_each_request(monkeypatch, tmp_path) -> None
 
 def test_runner_stops_on_deadline_and_low_disk(monkeypatch, tmp_path) -> None:
     stub_env(monkeypatch)
-    monkeypatch.setattr(sandbox_runner, "sandbox", lambda req, npm_ok: pytest.fail("не должно запускаться"))
+    monkeypatch.setattr(sandbox_runner, "sandbox", lambda req: pytest.fail("не должно запускаться"))
     out = tmp_path / "results.json"
     monkeypatch.setattr(sandbox_runner, "DEADLINE", 0)
     assert sandbox_runner.main(["x", str(write(tmp_path / "r.json", reqs(2))), str(out)]) == 0
@@ -529,7 +576,7 @@ def test_runner_refuses_without_gvisor(monkeypatch, tmp_path) -> None:
 def test_runner_refuses_when_isolation_is_broken(monkeypatch, tmp_path) -> None:
     stub_env(monkeypatch)
     monkeypatch.setattr(sandbox_runner, "isolation_check", lambda: "egress: 169.254.169.254:80 открыт")
-    monkeypatch.setattr(sandbox_runner, "sandbox", lambda req, npm_ok: pytest.fail("изоляция нарушена — ничего"))
+    monkeypatch.setattr(sandbox_runner, "sandbox", lambda req: pytest.fail("изоляция нарушена — ничего"))
     out = tmp_path / "results.json"
     assert sandbox_runner.main(["x", str(write(tmp_path / "r.json", reqs(1))), str(out)]) == 4
     assert json.loads(out.read_text()) == []
@@ -543,11 +590,57 @@ def test_isolation_probe_checks_what_must_be_closed() -> None:
         assert target in probe
 
 
-def test_npm_without_safety_flags_is_not_installed(monkeypatch) -> None:
-    monkeypatch.setattr(sandbox_runner, "run", lambda *a, **k: pytest.fail("ставить нельзя"))
-    req = {"id": "a", "ecosystem": "npm", "package": "x", "version": "1", "bins": ["x"]}
-    res = sandbox_runner.sandbox(req, npm_ok=False)
-    assert res["stage"] == "install" and not res["ok"]
+def test_npm_without_safety_flags_is_skipped_not_failed(monkeypatch, tmp_path) -> None:
+    """Сбой окружения — не приговор пакету: npm-заявки остаются ожидающими, job падает (оповещение)."""
+    stub_env(monkeypatch)
+    monkeypatch.setattr(sandbox_runner, "npm_flags_ok", lambda: False)
+    ran = []
+    monkeypatch.setattr(sandbox_runner, "sandbox", lambda req: ran.append(req["id"]) or {
+        "id": req["id"], "version": "1", "ok": True, "stage": "run", "command": "p0 --help", "detail": ""})
+    npm = {"id": "n1", "ecosystem": "npm", "package": "x", "version": "1", "bins": ["x"]}
+    out = tmp_path / "results.json"
+    assert sandbox_runner.main(["x", str(write(tmp_path / "r.json", [npm, *reqs(1)])), str(out)]) == 5
+    assert ran == ["c0"] and [r["id"] for r in json.loads(out.read_text())] == ["c0"]
+
+
+def test_proxy_relay_keeps_long_downloads(monkeypatch) -> None:
+    """Клиент молчит, а ответ идёт дольше PROXY_IDLE — туннель не обрывается; EOF доходит до клиента."""
+    import socket
+    import threading
+    import time
+
+    monkeypatch.setattr(sandbox_runner, "PROXY_IDLE", 1)
+    client, proxy_client = socket.socketpair()
+    proxy_upstream, server = socket.socketpair()
+    t = threading.Thread(target=sandbox_runner.relay, args=(proxy_client, proxy_upstream), daemon=True)
+    t.start()
+
+    def serve() -> None:
+        for _ in range(6):  # 6 × 0.4 с = 2.4 с > PROXY_IDLE
+            server.sendall(b"x" * 1000)
+            time.sleep(0.4)
+        server.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    got = b""
+    client.settimeout(5)
+    while chunk := client.recv(65536):
+        got += chunk
+    assert len(got) == 6000
+    t.join(5)
+    assert not t.is_alive()
+
+
+def test_proxy_relay_stops_when_both_sides_are_silent(monkeypatch) -> None:
+    import socket
+    import time
+
+    monkeypatch.setattr(sandbox_runner, "PROXY_IDLE", 0.3)
+    _client, b = socket.socketpair()
+    c, _server = socket.socketpair()
+    started = time.monotonic()
+    sandbox_runner.relay(b, c)
+    assert time.monotonic() - started < 3
 
 
 def test_preflight_requires_runsc(monkeypatch) -> None:
@@ -594,9 +687,14 @@ def test_save_job_token_only_for_state_steps() -> None:
     apply = next(s for s in save["steps"] if "sandbox-apply" in s.get("run", ""))
     assert "--requests sandbox-in/requests.json" in apply["run"] and "env" not in apply
     assert any("sha256sum -c" in s.get("run", "") for s in save["steps"])  # заявки сверены с job plan
+    # имена артефактов со случайной частью от job plan: job run не займёт их для следующей попытки
+    names = [s["with"]["name"] for job in workflow("sandbox.yml")["jobs"].values() for s in job.get("steps", [])
+             if "artifact" in s.get("uses", "")]
+    assert len(names) == 5 and all(n.endswith(("needs.plan.outputs.nonce }}", "steps.export.outputs.nonce }}"))
+                                   for n in names)
 
 
-@pytest.mark.parametrize("name", ["_run.yml", "sandbox.yml"])
+@pytest.mark.parametrize("name", ["_run.yml", "sandbox.yml", "ci.yml"])
 def test_no_actions_cache_in_jobs_with_secrets_or_write_access(name) -> None:
     for job in workflow(name)["jobs"].values():
         for step in job.get("steps", []):

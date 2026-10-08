@@ -31,6 +31,7 @@ import ipaddress
 import json
 import os
 import re
+import selectors
 import shutil
 import socket
 import subprocess
@@ -53,8 +54,13 @@ ID = re.compile(r"^[\w.-]{1,80}$")
 INSTALL_TIMEOUT = 240
 RUN_TIMEOUT = 60
 CLEANUP_TIMEOUT = 120
-DEADLINE = 25 * 60           # на все заявки, после проверки окружения; шаг обрывает GitHub через 38 минут
-REQUEST_BUDGET = INSTALL_TIMEOUT + 2 * RUN_TIMEOUT + CLEANUP_TIMEOUT  # худший случай одной заявки
+KILL_TIMEOUT = 30
+PULL_TIMEOUT = 180
+# худший случай одной заявки: venv, установка, --help, --version, уборка, и на каждый шаг — остановка контейнера
+REQUEST_BUDGET = RUN_TIMEOUT + INSTALL_TIMEOUT + 2 * RUN_TIMEOUT + CLEANUP_TIMEOUT + 5 * KILL_TIMEOUT
+# весь запуск, считая с проверки окружения; новая заявка начинается, только если её худший случай укладывается.
+# Итого не больше DEADLINE + время проверки изоляции — меньше 38 минут, после которых шаг обрывает GitHub.
+DEADLINE = 22 * 60
 MAX_REQUESTS = 10
 MAX_OUTPUT = 1024 * 1024     # байт вывода одного контейнера; больше — контейнер останавливается
 TAIL_BYTES = 4096
@@ -94,7 +100,8 @@ def docker_argv(name: str, image: str, args: list[str], *, workdir: str, network
 
 
 def _kill(name: str) -> None:
-    subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=60)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=KILL_TIMEOUT)
 
 
 def run(image: str, args: list[str], *, workdir: str, network: bool | str, readonly: bool,
@@ -141,18 +148,19 @@ def tail(text: str, limit: int = 400) -> str:
     return re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text)[-limit:]
 
 
-def install_steps(req: dict[str, Any]) -> list[tuple[str, list[str], bool]]:
-    """(образ, команда, нужна ли сеть). Ни на одном шаге с сетью не выполняется код пакета."""
+def install_steps(req: dict[str, Any]) -> list[tuple[str, list[str], bool, int]]:
+    """(образ, команда, нужна ли сеть, таймаут). Ни на одном шаге с сетью не выполняется код пакета."""
     pkg, ver = req["package"], req["version"]
     if req["ecosystem"] == "pypi":
         return [
-            (PY_IMAGE, ["python", "-m", "venv", "/opt/pkg/venv"], False),
+            (PY_IMAGE, ["python", "-m", "venv", "/opt/pkg/venv"], False, RUN_TIMEOUT),
             (PY_IMAGE, ["/opt/pkg/venv/bin/pip", "install", "--no-cache-dir", "--disable-pip-version-check",
-                        "--no-input", "--proxy", PROXY_URL, "--only-binary=:all:", f"{pkg}=={ver}"], True),
+                        "--no-input", "--proxy", PROXY_URL, "--only-binary=:all:", f"{pkg}=={ver}"], True,
+             INSTALL_TIMEOUT),
         ]
     return [(NODE_IMAGE, ["npm", "install", *NPM_SAFE, "--no-audit", "--no-fund", "--omit=dev",
                           "--no-update-notifier", "--proxy", PROXY_URL, "--https-proxy", PROXY_URL,
-                          "--cache", "/tmp/.npm", "--prefix", "/opt/pkg", f"{pkg}@{ver}"], True)]
+                          "--cache", "/tmp/.npm", "--prefix", "/opt/pkg", f"{pkg}@{ver}"], True, INSTALL_TIMEOUT)]
 
 
 def _norm(name: str) -> str:
@@ -201,40 +209,36 @@ def pypi_scripts(workdir: Path, package: str) -> list[str]:
                 path = line.split(",", 1)[0]
                 if path.startswith("../../../bin/") and path.count("/") == 4:
                     out.append(path.rsplit("/", 1)[1])
-    names = {n for n in out if BIN.match(n) and related(n, package)}
+    names = {n for n in out if BIN.fullmatch(n) and related(n, package)}
     # сначала команда с именем пакета
     return sorted(names, key=lambda n: (_norm(n) != _norm(package), n))
 
 
 def valid(req: Any) -> bool:
-    if not isinstance(req, dict) or not isinstance(req.get("id"), str) or not ID.match(req["id"]):
+    if not isinstance(req, dict) or not isinstance(req.get("id"), str) or not ID.fullmatch(req["id"]):
         return False
     eco, pkg, ver = req.get("ecosystem"), req.get("package"), req.get("version")
-    if not isinstance(pkg, str) or not isinstance(ver, str) or not VERSION.match(ver):
+    if not isinstance(pkg, str) or not isinstance(ver, str) or not VERSION.fullmatch(ver):
         return False
     bins = req.get("bins") or []
-    if not isinstance(bins, list) or not all(isinstance(b, str) and BIN.match(b) for b in bins):
+    if not isinstance(bins, list) or not all(isinstance(b, str) and BIN.fullmatch(b) for b in bins):
         return False
     if eco == "pypi":
-        return bool(PYPI_NAME.match(pkg))
-    return eco == "npm" and bool(NPM_NAME.match(pkg)) and bool(bins)
+        return bool(PYPI_NAME.fullmatch(pkg))
+    return eco == "npm" and bool(NPM_NAME.fullmatch(pkg)) and bool(bins)
 
 
-def sandbox(req: Any, *, npm_ok: bool = True) -> dict[str, Any]:
+def sandbox(req: Any) -> dict[str, Any]:
     rid = req.get("id") if isinstance(req, dict) else None
     ver = req.get("version") if isinstance(req, dict) else None
     res: dict[str, Any] = {"id": rid, "version": ver, "ok": False, "stage": "invalid", "command": "", "detail": ""}
     if not valid(req):
         return res
-    if req["ecosystem"] == "npm" and not npm_ok:
-        res.update(stage="install", detail="npm в образе не знает флагов безопасности — не ставим")
-        return res
     workdir = Path(tempfile.mkdtemp(prefix="sbx-", dir=os.environ.get("SBX_ROOT") or None))
     os.chmod(workdir, 0o777)  # контейнер работает от 1000:1000
     try:
-        for image, args, network in install_steps(req):
-            rc, out = run(image, args, workdir=str(workdir), network=network, readonly=False,
-                          timeout=INSTALL_TIMEOUT)
+        for image, args, network, timeout in install_steps(req):
+            rc, out = run(image, args, workdir=str(workdir), network=network, readonly=False, timeout=timeout)
             if rc != 0 or "Unknown cli config" in out:
                 res.update(stage="install", detail=tail(out))
                 return res
@@ -278,18 +282,37 @@ def public_addrs(host: str) -> list[str]:
     return ips if ips and all(ipaddress.ip_address(ip).is_global for ip in ips) else []
 
 
-def _pipe(src: socket.socket, dst: socket.socket) -> None:
-    sent = 0
-    try:
-        while sent < PROXY_MAX_BYTES and (data := src.recv(65536)):
-            dst.sendall(data)
-            sent += len(data)
-    except OSError:
-        pass
-    finally:
-        for s in (src, dst):
-            with contextlib.suppress(OSError):
-                s.shutdown(socket.SHUT_RDWR)
+def relay(a: socket.socket, b: socket.socket) -> None:
+    """Туннель в обе стороны. Обрывается, только если обе стороны молчат PROXY_IDLE секунд или объём превышен:
+    долгая загрузка, при которой клиент ничего не шлёт, не обрывается. EOF одной стороны — SHUT_WR у другой."""
+    peer = {a: b, b: a}
+    with selectors.DefaultSelector() as sel:
+        for sock in peer:
+            sock.settimeout(PROXY_IDLE)
+            sel.register(sock, selectors.EVENT_READ)
+        total, live = 0, 2
+        while live and total < PROXY_MAX_BYTES:
+            events = sel.select(PROXY_IDLE)
+            if not events:
+                return
+            for key, _ in events:
+                src = key.fileobj
+                assert isinstance(src, socket.socket)
+                try:
+                    data = src.recv(65536)
+                except OSError:
+                    return
+                if not data:
+                    sel.unregister(src)
+                    live -= 1
+                    with contextlib.suppress(OSError):
+                        peer[src].shutdown(socket.SHUT_WR)
+                    continue
+                try:
+                    peer[src].sendall(data)
+                except OSError:
+                    return
+                total += len(data)
 
 
 def _proxy_one(client: socket.socket, slots: threading.BoundedSemaphore) -> None:
@@ -313,10 +336,7 @@ def _proxy_one(client: socket.socket, slots: threading.BoundedSemaphore) -> None
         client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
         if rest:
             upstream.sendall(rest)
-        back = threading.Thread(target=_pipe, args=(upstream, client), daemon=True)
-        back.start()
-        _pipe(client, upstream)
-        back.join(PROXY_IDLE)
+        relay(client, upstream)
     except OSError:
         pass
     finally:
@@ -349,7 +369,7 @@ def preflight() -> str | None:
     if info.returncode != 0 or RUNTIME not in info.stdout:
         return "gVisor (runsc) не подключён к Docker"
     for image in (PY_IMAGE, NODE_IMAGE):
-        if _docker("pull", "-q", image, timeout=300).returncode != 0:
+        if _docker("pull", "-q", image, timeout=PULL_TIMEOUT).returncode != 0:
             return f"не скачать образ {image.split('@')[0]}"
     return None
 
@@ -409,8 +429,9 @@ if mode == "install":
     closed = [("1.1.1.1", 443), ("169.254.169.254", 80), ("{INT_GW}", port)]
     if via_proxy("example.com") != "403":
         bad.append("прокси пускает example.com")
-    if via_proxy("pypi.org") != "200":
-        bad.append("прокси не пускает pypi.org")
+    for ok_host in ("pypi.org", "registry.npmjs.org"):
+        if via_proxy(ok_host) != "200":
+            bad.append(f"прокси не пускает {{ok_host}}")
 else:
     closed = [("169.254.169.254", 80), ("168.63.129.16", 80), ("{EGRESS_GW}", port)]
     if not reach("1.1.1.1", 443):
@@ -491,10 +512,11 @@ def main(argv: list[str]) -> int:
     out = Path(argv[2])
     results: list[dict[str, Any]] = []
     write_results(out, results)
+    start = time.monotonic()
     if problem := preflight():
         print(f"песочница: {problem} — ничего не запускаю", file=sys.stderr)
         return 3
-    start = time.monotonic()
+    code = 0
     try:
         network_up(Path(__file__).resolve())
         if problem := isolation_check():
@@ -504,7 +526,9 @@ def main(argv: list[str]) -> int:
               "машина, метаданные облака и служебный адрес Azure недоступны)")
         npm_ok = npm_flags_ok()
         if not npm_ok:
+            # сбой окружения, а не пакета: npm-заявки остаются ожидающими, job завершится ошибкой (оповещение)
             print("песочница: npm не понимает флаги безопасности — npm-пакеты не ставлю", file=sys.stderr)
+            code = 5
         for req in (requests if isinstance(requests, list) else [])[:MAX_REQUESTS]:
             if time.monotonic() - start > DEADLINE - REQUEST_BUDGET:
                 print("песочница: время запуска вышло — остальные заявки в следующий раз")
@@ -513,11 +537,13 @@ def main(argv: list[str]) -> int:
                 print(f"песочница: {why} — остальные заявки в следующий раз")
                 break
             d = req if isinstance(req, dict) else {}
+            if d.get("ecosystem") == "npm" and not npm_ok:
+                continue
             results.append({"id": d.get("id"), "version": d.get("version"), "ok": False, "stage": "started",
                             "command": "", "detail": ""})
             write_results(out, results)
             try:
-                r = sandbox(req, npm_ok=npm_ok)
+                r = sandbox(req)
             except Exception as e:  # одна заявка не должна ронять остальные
                 r = {**results[-1], "stage": "error", "detail": f"{type(e).__name__}: {tail(str(e), 200)}"}
             results[-1] = r
@@ -526,7 +552,7 @@ def main(argv: list[str]) -> int:
                   f"{r['command']}")
     finally:
         network_down()
-    return 0
+    return code
 
 
 if __name__ == "__main__":

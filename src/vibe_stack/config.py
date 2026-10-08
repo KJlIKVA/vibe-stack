@@ -179,6 +179,8 @@ class SandboxConfig(BaseModel):
     max_requests_per_run: int = 10
     max_age_hours: int = 24      # заявку старше этого в песочницу не отдаём
     max_attempts: int = 2        # столько раз запуск может оборваться на заявке, потом она «не запустилась»
+    # True — пакет только с provenance из репозитория поста; False — ещё и по манифесту репозитория (решение 44)
+    require_provenance: bool = False
 
 
 class DigestConfig(BaseModel):
