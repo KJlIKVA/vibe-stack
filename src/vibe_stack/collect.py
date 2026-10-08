@@ -167,6 +167,9 @@ def process_candidate(rt: Runtime, c: Candidate, rubrics: dict[str, Rubric]) -> 
 
     score: ScoreResult = rt.llm.json("score", prompts.score_prompt(c.for_prompt(), doc.text), ctx_id=c.id)
     g = gate(score, rt.cfg, rubrics)
+    # объяснение модели — в лог запуска: по нему видно, почему видео или статья «стоит» или «не стоит» поста
+    log.info("оценка %s: %s, %s/15, %s — %s", c.url, score.category, g.total, ",".join(g.reasons) or "прошла",
+             score.reason)
     if not g.passed:
         return _reject(rt, c, "gate", g.reasons, score, g.rubric, g.total)
     assert g.rubric is not None

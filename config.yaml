@@ -47,6 +47,8 @@ gate:
   min_verifiability: 2
   max_age_days: 30            # старше — hard stop outdated (по дате создания/обновления)
   min_approved_claims: 2
+  # «Книга/видео» (решение 49): только то, что реально стоит часа — польза не ниже 4 из 5
+  min_usefulness: {book_video: 4}
 
 schedule:
   # в channel.tz: каждые 30 минут с 08:00 до 23:30, ночью канал молчит; в слот — не больше одного поста
@@ -284,6 +286,7 @@ sources:
                UC_x5XG1OV2P6uZZ5FSM9Ttw, UCP7jMXSY2xbc3KCAE0MHQ-A, UCXUPKJO5MZQN11PqgIvyuvQ,
                UCvi5jNRoRVm436TVAXet1kQ]
     skip_title_regex: ["#shorts"]
+    min_minutes: 8  # короче — тизеры, нарезки, промо: смотреть «полезное» в них нечего
   - name: pragprog-books
     # новые книги Pragmatic Bookshelf — только про ИИ и разработку с ИИ
     type: rss

@@ -4,7 +4,8 @@ RSS YouTube и страницы видео из GitHub Actions закрыты (4
 официальный API с ключом YOUTUBE_API_KEY. Без ключа источник молча ничего не возвращает. Ключ передаётся
 заголовком, а не в адресе: адреса запросов могут попасть в логи.
 
-Квота: список загрузок канала — 1 единица, данные видео — 1 единица; бесплатный лимит — 10 000 в день.
+Квота: список загрузок канала — 1 единица, длительности видео канала — 1 единица, данные видео при проверке —
+1 единица; бесплатный лимит — 10 000 в день. Видео короче min_minutes (Shorts, тизеры) отсекаются до модели.
 Субтитры через API без OAuth не скачать, поэтому пост о видео — пересказ по описанию (так и пишется в посте).
 """
 
@@ -64,15 +65,33 @@ class YouTubeSource:
             uploads = "UU" + channel[2:]  # плейлист «все загрузки» канала UC… — UU…
             data = api_get(self.client, "playlistItems", {"part": "snippet,contentDetails", "playlistId": uploads,
                                                           "maxResults": 8})
+            items = []
             for item in data.get("items") or []:
                 sn, cd = item.get("snippet") or {}, item.get("contentDetails") or {}
                 vid, title = cd.get("videoId"), (sn.get("title") or "").strip()
-                if not vid or not title or any(p.search(title) for p in skip):
+                if vid and title and not any(p.search(title) for p in skip):
+                    items.append((vid, title, sn, cd))
+            minutes = self._durations([vid for vid, *_ in items])
+            for vid, title, sn, cd in items:
+                mins = minutes.get(vid)
+                if mins is None or mins < self.cfg.min_minutes:
                     continue
                 out.append(Candidate(
                     source=self.name, source_type="youtube", url=f"https://www.youtube.com/watch?v={vid}",
-                    title=title, summary=(sn.get("description") or "")[:1500],
+                    title=title, summary=f"Длительность: {mins} мин\n{(sn.get('description') or '')[:1500]}",
                     published_at=parse_dt(cd.get("videoPublishedAt") or sn.get("publishedAt")),
-                    signal=0.8, extra={"channel": sn.get("channelTitle") or ""},
+                    signal=0.8, extra={"channel": sn.get("channelTitle") or "", "minutes": mins},
                 ))
+        return out
+
+    def _durations(self, ids: list[str]) -> dict[str, int]:
+        """Длительность в минутах; видео без длительности (трансляция идёт, видео удалено) — нет в ответе."""
+        if not ids:
+            return {}
+        data = api_get(self.client, "videos", {"part": "contentDetails", "id": ",".join(ids[:50])})
+        out = {}
+        for item in data.get("items") or []:
+            mins = duration_minutes((item.get("contentDetails") or {}).get("duration") or "")
+            if item.get("id") and mins:
+                out[item["id"]] = mins
         return out

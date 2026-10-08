@@ -129,11 +129,14 @@ UPLOADS = {"items": [
     {"snippet": {"title": "Building agents — talk", "description": "Chapters: 00:00 intro", "channelTitle": "AI Eng"},
      "contentDetails": {"videoId": "abcdefghijk", "videoPublishedAt": "2026-10-06T10:00:00Z"}},
     {"snippet": {"title": "quick tip #shorts"}, "contentDetails": {"videoId": "zzzzzzzzzzz"}},
+    {"snippet": {"title": "Teaser"}, "contentDetails": {"videoId": "ttttttttttt"}},
 ]}
-VIDEO = {"items": [{"snippet": {"title": "Building agents — talk", "channelTitle": "AI Eng",
+VIDEO = {"items": [{"id": "abcdefghijk",
+                    "snippet": {"title": "Building agents — talk", "channelTitle": "AI Eng",
                                 "publishedAt": "2026-10-06T10:00:00Z", "description": "00:00 intro\n05:10 evals",
                                 "thumbnails": {"high": {"url": "https://i.ytimg.com/vi/abcdefghijk/hq.jpg"}}},
-                    "contentDetails": {"duration": "PT1H2M40S"}}]}
+                    "contentDetails": {"duration": "PT1H2M40S"}},
+                   {"id": "ttttttttttt", "snippet": {"title": "Teaser"}, "contentDetails": {"duration": "PT1M5S"}}]}
 
 
 def test_youtube_without_key_is_silent(monkeypatch) -> None:
@@ -146,15 +149,31 @@ def test_youtube_source_and_video_doc_key_in_header(cfg, now, monkeypatch) -> No
     monkeypatch.setenv("YOUTUBE_API_KEY", "test-key-123")
     seen: list[httpx.Request] = []
     routes = {f"{youtube.API}/playlistItems": UPLOADS, f"{youtube.API}/videos": VIDEO}
-    src = youtube.YouTubeSource(SourceConfig(name="yt", type="youtube", channels=["UCabc"],
+    src = youtube.YouTubeSource(SourceConfig(name="yt", type="youtube", channels=["UCabc"], min_minutes=8,
                                              skip_title_regex=["#shorts"]), client(routes, seen))
-    (c,) = src.collect()
+    (c,) = src.collect()  # #shorts — по заголовку, минутный тизер — по длительности
     assert c.url == "https://www.youtube.com/watch?v=abcdefghijk" and c.source_type == "youtube"
+    assert c.summary.startswith("Длительность: 63 мин")
     assert "playlistId=UUabc" in str(seen[0].url)  # плейлист загрузок канала
     doc = HttpFetcher(cfg.fetch, lambda: now, client(routes, seen), check_urls=False).fetch(c.url, purpose="score")
     assert doc.ok and "Длительность: 63 мин" in doc.text and "05:10 evals" in doc.text
     assert doc.image == "https://i.ytimg.com/vi/abcdefghijk/hq.jpg"
     assert all("test-key-123" not in str(r.url) and r.headers["X-Goog-Api-Key"] == "test-key-123" for r in seen)
+
+
+def test_book_video_needs_high_usefulness(cfg) -> None:
+    """«Книга/видео» — только то, что стоит часа (решение 49): общий порог суммы мало, нужна польза 4 из 5."""
+    from vibe_stack.models import ScoreResult
+    from vibe_stack.steps import gate
+
+    def score(category: str, usefulness: int) -> ScoreResult:
+        return ScoreResult.model_validate({"id": "x", "category": category, "scores": {
+            "novelty": 3, "usefulness": usefulness, "verifiability": 3, "substance": 2, "audience_fit": 2}})
+
+    rubrics = {k: v.model_copy(update={"enabled": True}) for k, v in cfg.rubrics.items()}
+    assert gate(score("book_video", 3), cfg, rubrics).reasons == ["low_usefulness"]  # сумма 13 из 15 — мало
+    assert gate(score("book_video", 4), cfg, rubrics).passed
+    assert gate(score("tool", 3), cfg, rubrics).passed  # у других рубрик порог прежний
 
 
 def test_duration_and_video_id() -> None:

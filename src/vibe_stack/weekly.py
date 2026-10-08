@@ -27,6 +27,7 @@ REASON_LABELS = {
     "injection_detected": "попытка prompt injection в тексте",
     "low_score": "мало практической пользы",
     "low_verifiability": "нельзя проверить по источнику",
+    "low_usefulness": "не стоит потраченного времени",
     "verify_fail": "утверждения не подтвердились источником",
     "approved_claims": "подтвердилось меньше двух утверждений",
     "verify_source_unavailable": "источник недоступен при проверке",

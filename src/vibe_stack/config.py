@@ -67,6 +67,8 @@ class Gate(BaseModel):
     min_verifiability: int = 2
     max_age_days: int = 30
     min_approved_claims: int = 2
+    # свой порог полезности (usefulness 0–5) для рубрики: «Книга/видео» — только то, что стоит потраченного часа
+    min_usefulness: dict[str, int] = Field(default_factory=dict)
 
 
 class Schedule(BaseModel):
@@ -186,6 +188,7 @@ class SourceConfig(BaseModel):
     # агрегатор ссылок (Reddit): берём внешнюю ссылку «[link]» из записи; записи без неё (обсуждения, картинки,
     # видео на этих хостах) пропускаем — их страницы роботам закрыты, а первоисточник — по внешней ссылке
     aggregator_hosts: list[str] = Field(default_factory=list)
+    min_minutes: int = 0  # youtube: короче — не берём (Shorts, тизеры, нарезки)
 
 
 class SandboxConfig(BaseModel):

@@ -113,6 +113,8 @@ def gate(score: ScoreResult, cfg: Config, rubrics: dict[str, Rubric]) -> GateRes
         reasons.append("low_score")
     if score.scores.verifiability < cfg.gate.min_verifiability:
         reasons.append("low_verifiability")
+    if rubric and score.scores.usefulness < cfg.gate.min_usefulness.get(rubric, 0):
+        reasons.append("low_usefulness")
     return GateResult(rubric, total, sorted(set(reasons), key=reasons.index))
 
 
