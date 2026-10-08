@@ -59,6 +59,20 @@ def test_arena_category_block_after_overall() -> None:
     assert calls == [0, 100, 200, 300]
 
 
+def test_arena_retries_temporary_errors(monkeypatch) -> None:
+    import vibe_stack.leaderboards as lb
+
+    monkeypatch.setattr(lb.time, "sleep", lambda s: None)
+    answers = [502, 503, 200]
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        code = answers.pop(0)
+        return httpx.Response(code, json={"rows": [row(1, "a"), row(2, "b"), row(3, "c")]} if code == 200 else {})
+
+    cfg = LeaderboardConfig(key="arena_text", type="arena_hf", label="Текст", dataset_config="text_style_control")
+    assert ArenaAdapter(cfg, httpx.Client(transport=httpx.MockTransport(handler))).fetch().top == ["a", "b", "c"]
+
+
 def test_arena_scores_shown_as_in_source() -> None:
     """Рейтинг места (решение 55): Arena Score — целым, IPS у Agent Arena — тремя знаками, нет числа — пусто."""
     a, _ = arena_with([[row(1, "a", rating=1525.215), row(2, "b", rating=1504.73), row(3, "c")]])

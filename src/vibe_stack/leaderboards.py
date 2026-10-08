@@ -54,8 +54,11 @@ class ArenaAdapter:
         params = {"dataset": HF_DATASET, "config": self.config, "split": "latest", "offset": page * 100,
                   "length": 100}
         r = self.client.get(HF_ROWS, params=params)
-        if r.status_code == 429:  # частые запросы подряд datasets-server ограничивает — одна пауза и повтор
-            time.sleep(3)
+        # datasets-server ограничивает частые запросы (429) и временами отвечает 502/503 — две паузы и повтор
+        for pause in (3, 10):
+            if r.status_code != 429 and r.status_code < 500:
+                break
+            time.sleep(pause)
             r = self.client.get(HF_ROWS, params=params)
         r.raise_for_status()
         return [x["row"] for x in r.json().get("rows", [])]
