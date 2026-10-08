@@ -58,15 +58,20 @@ schedule:
                   "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"]
   slot_window_minutes: 30     # слот активен до следующего; тик (tick.yml) приходит на :07 и :37
   queue_max_age_days: 5       # одобренный, но не вышедший пост старше этого устаревает
+  queue_max_age_days_by: {"book_video:book": 30}  # книга ждёт своей недели, а не устаревает за 5 дней
 
 planner:
   topic_repeat_days: 7
   topic_similarity: 0.5       # порог сходства заголовков (Jaccard по словам)
   max_per_domain_per_day: 3   # у репозиториев GitHub «домен» — владелец (github.com/owner)
   weekly_min: {glossary: 1, analysis: 1}
-  weekly_max: {}               # «Книга/видео» — без недельного предела, решает дневной (решение 50)
-  daily_max: {book_video: 1}  # «Что посмотреть/послушать/почитать» — один в день, если есть прошедшее отбор
-  backlog_daily_max: {book_video: 2}  # …а при очереди от backlog_queue таких постов — до двух в день
+  # «Книга/видео» (решения 50, 52): ключ «рубрика:группа» — book_video:watch (видео и подкасты),
+  # book_video:book (книги). Группа — по хештегу поста. При очереди группы от backlog_queue (считая вышедшие
+  # за день или неделю) действует backlog_*.
+  daily_max: {book_video: 3, "book_video:watch": 1}  # видео/подкаст — раз в день, если прошло отбор
+  backlog_daily_max: {"book_video:watch": 2}         # …при очереди от 5 — до двух в день
+  weekly_max: {"book_video:book": 1}                 # книга — раз в неделю
+  backlog_weekly_max: {"book_video:book": 3}         # …при очереди книг от 5 — до трёх в неделю
   backlog_queue: 5
 
 collect:

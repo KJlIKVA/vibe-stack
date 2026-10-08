@@ -75,6 +75,8 @@ class Schedule(BaseModel):
     publish_slots: list[str] = Field(default_factory=lambda: ["10:00", "14:00", "18:00"])
     slot_window_minutes: int = 120
     queue_max_age_days: int = 5
+    # свой срок в очереди по ключу «рубрика:группа»: книга не устаревает за 5 дней, а ждёт своей недели (решение 52)
+    queue_max_age_days_by: dict[str, int] = Field(default_factory=dict)
 
     @field_validator("publish_slots")
     @classmethod
@@ -93,8 +95,10 @@ class Planner(BaseModel):
     weekly_min: dict[str, int] = Field(default_factory=dict)
     weekly_max: dict[str, int] = Field(default_factory=dict)
     daily_max: dict[str, int] = Field(default_factory=dict)  # не больше стольких постов рубрики в день
-    # большая очередь рубрики (не меньше backlog_queue постов, считая вышедшие сегодня) — дневной максимум выше
+    # большая очередь (не меньше backlog_queue постов, считая вышедшие за день/неделю) — максимум выше.
+    # Ключи всех лимитов — рубрика или «рубрика:группа» (book_video:watch — видео и подкасты, book_video:book — книги)
     backlog_daily_max: dict[str, int] = Field(default_factory=dict)
+    backlog_weekly_max: dict[str, int] = Field(default_factory=dict)
     backlog_queue: int = 5
 
 

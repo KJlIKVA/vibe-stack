@@ -11,6 +11,7 @@ from . import dayplan, footer, images, prompts, sandbox
 from .board import BoardUnavailable
 from .lint import lint_post
 from .models import PostRecord, Status
+from .planner import limit_keys, media_group
 from .runtime import Runtime
 from .telegram import TelegramError
 from .urls import dedup_keys, host_of, short_id
@@ -114,8 +115,11 @@ def board_sent_today(rt: Runtime) -> list[PostRecord]:
 
 def _drop_stale_and_published(rt: Runtime, queue: list[PostRecord], now: datetime) -> list[PostRecord]:
     fresh = []
-    max_age = timedelta(days=rt.cfg.schedule.queue_max_age_days)
+    by_key = rt.cfg.schedule.queue_max_age_days_by
     for p in queue:
+        days = next((by_key[k] for k in reversed(limit_keys(p.rubric, media_group(p.html))) if k in by_key),
+                    rt.cfg.schedule.queue_max_age_days)
+        max_age = timedelta(days=days)
         if p.ref and rt.state.is_published_ref(p.ref):
             # отправлено, но доска не обновилась (например, Notion упал после отправки) — чиним статус
             _safe_update(rt, p.ref, status=Status.PUBLISHED)
@@ -179,6 +183,8 @@ def publish_post(rt: Runtime, post: PostRecord, *, slot: str | None, urgent: boo
                            "повторно автоматически не отправляю")
         mid = None
     _record(rt, post, ref, mid, now, slot=slot, urgent=urgent, counts_regular=counts_regular)
+    if group := media_group(text):  # для лимитов планировщика: книги — раз в неделю, видео — раз в день
+        rt.state.put(f"group:{ref}", group)
     rt.state.expire_sandbox(post.candidate_id, now)  # пост вышел — запускать его пакет больше незачем
     if mid is None:
         return False

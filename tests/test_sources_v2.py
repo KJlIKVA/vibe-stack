@@ -389,3 +389,53 @@ def test_book_freshness_uses_source_limit(cfg, now) -> None:
                      published_meta=(now - timedelta(days=90)).isoformat())
     assert doc_guards(doc, cfg, now) == ["outdated"]  # новость старше 30 дней — устарела
     assert doc_guards(doc, cfg, now, max_age_days=180) == []  # книге 3 месяца — нет
+
+
+# --- решение 52: книги — раз в неделю, видео и подкасты — раз в день; при большой очереди — чаще ------------
+BOOK, VIDEO_POST = "📚 <b>Book</b>\n\nТекст.\n\n#книга", "📚 <b>Talk</b>\n\nТекст.\n\n#видео"
+
+
+def test_media_group_by_hashtag() -> None:
+    from vibe_stack.planner import media_group
+
+    assert media_group(BOOK) == "book" and media_group(VIDEO_POST) == "watch"
+    assert media_group("…\n\n#подкаст") == "watch" and media_group("…\n\n#инструмент") is None
+
+
+def _plan(cfg, now, queue, hist, groups):
+    return pick_next(queue, hist, today=local_date(now, "Europe/Moscow"), now=now, cfg=cfg.planner,
+                     rubric_enabled=ENABLED, soft_rubric_repeat=True, groups=groups)
+
+
+def test_book_weekly_and_video_daily_are_separate(cfg, now) -> None:
+    hist = [published("Book A", "book_video", "https://a.dev/1", now - timedelta(hours=2))]
+    groups = {"Book A": "book", "Book B unique": "book", "Talk C unique": "watch"}
+    book = post("Book B unique", "book_video", "https://b.dev/2", score=15, now=now)
+    talk = post("Talk C unique", "book_video", "https://c.dev/3", score=12, now=now)
+    res = _plan(cfg, now, [book, talk], hist, groups)
+    assert res.post is talk  # книга на этой неделе уже была, а видео сегодня — ещё нет
+    assert "недельный максимум рубрики" in str(res.skipped["Book B unique"])
+
+
+@pytest.mark.parametrize(("books_this_week", "queued", "allowed"), [(1, 3, False), (1, 4, True), (3, 9, False)])
+def test_book_backlog_allows_more_per_week(cfg, now, books_this_week, queued, allowed) -> None:
+    """Очередь книг от 5 (вместе с вышедшими за неделю) — до трёх в неделю, а не одна."""
+    hist = [published(f"Alpha{i} volume", "book_video", f"https://h{i}.dev/", now - timedelta(hours=1 + i))
+            for i in range(books_this_week)]  # вышли сегодня, в среду: та же неделя
+    q = [post(f"Zeta{i} handbook{i}", "book_video", f"https://q{i}.dev/", score=15, now=now) for i in range(queued)]
+    groups = {h.ref: "book" for h in hist} | {p.ref: "book" for p in q}
+    cfg.planner.daily_max = {}  # проверяем только недельный лимит книг
+    assert (_plan(cfg, now, q, hist, groups).post is not None) is allowed
+
+
+def test_book_waits_in_queue_longer_than_news(cfg, tmp_path, now) -> None:
+    from vibe_stack.models import PostRecord, Status
+    from vibe_stack.publish import _drop_stale_and_published
+
+    rt = make_rt(cfg, tmp_path, now)
+    old = now - timedelta(days=10)
+    book = PostRecord(title="Book", rubric="book_video", status=Status.APPROVED, source_url="https://m.dev/b",
+                      found_at=old, html=BOOK)
+    talk = PostRecord(title="Talk", rubric="book_video", status=Status.APPROVED, source_url="https://y.dev/t",
+                      found_at=old, html=VIDEO_POST)
+    assert _drop_stale_and_published(rt, [book, talk], now) == [book]

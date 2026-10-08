@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 from .board import BoardUnavailable
 from .models import PostRecord
-from .planner import pick_next
+from .planner import media_group, pick_next
 from .runtime import Runtime
 from .storage import PublishedRow
 from .timeutil import local_date
@@ -93,13 +93,16 @@ def plan(rt: Runtime, queue: list[PostRecord], *, limit: int, sent_today: int,
 
     history = rt.state.published_since(today - timedelta(days=max(rt.cfg.planner.topic_repeat_days, 7) + 1))
     history += [_row(p, p.planned_at, tz) for p in planned if p.planned_at]
+    # группа «Книги/видео» (видео и подкасты / книги): у очереди — по хештегу поста, у вышедших — из состояния
+    groups: dict[str, str | None] = {h.ref: rt.state.get(f"group:{h.ref}") for h in history}
+    groups.update({p.ref: media_group(p.html) for p in queue if p.ref})
     rubrics = rt.rubrics()
     enabled = {k: r.enabled for k, r in rubrics.items()}
     order: list[PostRecord] = []
     remaining = list(unplanned)
     while remaining and len(order) < capacity:
         pick = pick_next(remaining, history, today=today, now=now, cfg=rt.cfg.planner, rubric_enabled=enabled,
-                         soft_rubric_repeat=True)
+                         soft_rubric_repeat=True, groups=groups)
         if pick.post is None:
             log.info("план дня: остальные посты не подходят сегодня — %s", pick.reason)
             break

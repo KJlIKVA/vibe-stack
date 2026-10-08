@@ -41,6 +41,21 @@ def domain_key(url: str, domain: str = "") -> str:
     return domain or host_of(url)
 
 
+# группа «Книги/видео» по хештегу поста (решение 52): видео и подкасты — «что посмотреть и послушать» с дневным
+# лимитом, книги — с недельным. Лимиты планировщика задаются и на рубрику, и на «рубрика:группа».
+MEDIA_GROUPS = {"#видео": "watch", "#подкаст": "watch", "#книга": "book"}
+_LAST_HASHTAG = re.compile(r"#[\w]+(?=\s*$)")
+
+
+def media_group(post_html: str) -> str | None:
+    m = _LAST_HASHTAG.search(post_html or "")
+    return MEDIA_GROUPS.get(m.group(0)) if m else None
+
+
+def limit_keys(rubric: str, group: str | None) -> list[str]:
+    return [rubric, f"{rubric}:{group}"] if group else [rubric]
+
+
 def same_topic(a: set[str], b: set[str], threshold: float) -> bool:
     if not a or not b:
         return False
@@ -75,33 +90,41 @@ def pick_next(
     weekly_min: dict[str, int] | None = None,
     weekly_max: dict[str, int] | None = None,
     soft_rubric_repeat: bool = False,
+    groups: dict[str, str | None] | None = None,
 ) -> Pick:
-    """history — опубликованное (обычное и срочное) минимум за topic_repeat_days дней."""
+    """history — опубликованное (обычное и срочное) минимум за topic_repeat_days дней.
+    groups — ref поста (в очереди и в истории) → группа «Книги/видео» (media_group), для лимитов по группам."""
     weekly_min = cfg.weekly_min if weekly_min is None else weekly_min
     weekly_max = cfg.weekly_max if weekly_max is None else weekly_max
     regular = [h for h in history if h.counts_regular and not h.urgent]
     last_rubric = max(regular, key=lambda h: h.published_at).rubric if regular else None
     domains_today = [domain_key(h.source_url, h.domain) for h in history if h.local_date == today]
-    rubric_today: dict[str, int] = {}
-    for h in history:
-        if h.local_date == today:
-            rubric_today[h.rubric] = rubric_today.get(h.rubric, 0) + 1
-    queued: dict[str, int] = {}
-    for p in queue:
-        queued[p.rubric] = queued.get(p.rubric, 0) + 1
+    groups = groups or {}
 
-    def daily_limit(rubric: str) -> int | None:
-        """Дневной максимум; при большой очереди (решение 50) — выше. Очередь считаем с вышедшими сегодня:
-        иначе каждый выпущенный пост уменьшал бы её, и очередь ровно из backlog_queue давала бы один пост."""
-        if (bmx := cfg.backlog_daily_max.get(rubric)) is not None and \
-                queued.get(rubric, 0) + rubric_today.get(rubric, 0) >= cfg.backlog_queue:
-            return bmx
-        return cfg.daily_max.get(rubric)
+    def keys(rubric: str, ref: str | None) -> list[str]:
+        return limit_keys(rubric, groups.get(ref or ""))
+
     wk = week_start(today)
+    rubric_today: dict[str, int] = {}  # ключи — рубрика и «рубрика:группа»
     week_counts: dict[str, int] = {}
     for h in history:
-        if h.local_date >= wk:
-            week_counts[h.rubric] = week_counts.get(h.rubric, 0) + 1
+        for k in keys(h.rubric, h.ref):
+            if h.local_date == today:
+                rubric_today[k] = rubric_today.get(k, 0) + 1
+            if h.local_date >= wk:
+                week_counts[k] = week_counts.get(k, 0) + 1
+    queued: dict[str, int] = {}
+    for p in queue:
+        for k in keys(p.rubric, p.ref):
+            queued[k] = queued.get(k, 0) + 1
+
+    def limit(key: str, normal: dict[str, int], backlog: dict[str, int], done: dict[str, int]) -> int | None:
+        """Максимум за день или неделю; при большой очереди (решения 50, 52) — выше. Очередь считаем вместе
+        с вышедшим за период: иначе каждый выпущенный пост уменьшал бы её, и очередь ровно из backlog_queue
+        давала бы обычный максимум."""
+        if (bmx := backlog.get(key)) is not None and queued.get(key, 0) + done.get(key, 0) >= cfg.backlog_queue:
+            return bmx
+        return normal.get(key)
     recent_cutoff = now - timedelta(days=cfg.topic_repeat_days)
     recent_topics = [
         (topic_tokens(h.title, h.source_url), canonical_url(h.source_url) if h.source_url else "")
@@ -119,10 +142,13 @@ def pick_next(
         domain = domain_key(p.source_url, p.source_domain)
         if domains_today.count(domain) >= cfg.max_per_domain_per_day:
             reasons.append(f"домен {domain} уже был сегодня")
-        if (mx := weekly_max.get(p.rubric)) is not None and week_counts.get(p.rubric, 0) >= mx:
-            reasons.append("недельный максимум рубрики")
-        if (dmx := daily_limit(p.rubric)) is not None and rubric_today.get(p.rubric, 0) >= dmx:
-            reasons.append("дневной максимум рубрики")
+        for k in keys(p.rubric, p.ref):
+            if (mx := limit(k, weekly_max, cfg.backlog_weekly_max, week_counts)) is not None \
+                    and week_counts.get(k, 0) >= mx:
+                reasons.append("недельный максимум рубрики")
+            if (dmx := limit(k, cfg.daily_max, cfg.backlog_daily_max, rubric_today)) is not None \
+                    and rubric_today.get(k, 0) >= dmx:
+                reasons.append("дневной максимум рубрики")
         toks = topic_tokens(p.title, p.source_url)
         canon = canonical_url(p.source_url) if p.source_url else ""
         if any((canon and canon == c) or same_topic(toks, t, cfg.topic_similarity) for t, c in recent_topics):
