@@ -266,3 +266,15 @@ def test_daily_token_limit_resets_at_utc_midnight(cfg, tmp_path, now) -> None:
         llm.text("write", "p", "a")
     clock["now"] = t + timedelta(minutes=15)  # 00:05 UTC — новые сутки OpenAI
     llm.text("write", "p", "a")
+
+
+def test_split_message_by_paragraphs() -> None:
+    from vibe_stack.telegram import split_message
+
+    text = "\n\n".join(f"<b>Раздел {i}</b>\n" + "строка\n" * 40 for i in range(20))
+    parts = split_message(text, limit=1000)
+    assert all(len(p) <= 1000 for p in parts) and len(parts) > 1
+    assert "\n\n".join(parts) == text.strip()  # ничего не потеряно, абзацы не разрезаны
+    assert split_message("коротко") == ["коротко"]
+    long_para = "\n".join(["x" * 50] * 100)  # один абзац длиннее лимита — режется по строкам
+    assert all(len(p) <= 1000 for p in split_message(long_para, limit=1000))

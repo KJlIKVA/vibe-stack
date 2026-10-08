@@ -149,6 +149,24 @@ class DryRunTelegram:
         return {"message_id": mid, "text": plain}
 
 
+def split_message(text: str, limit: int = 4000) -> list[str]:
+    """Длинный текст — на части по абзацам (теги HTML в отчётах не переходят через пустую строку)."""
+    parts: list[str] = []
+    cur = ""
+    for para in text.strip().split("\n\n"):
+        while len(para) > limit:  # абзац длиннее лимита — режем по строкам
+            cut = para.rfind("\n", 0, limit)
+            cut = cut if cut > 0 else limit
+            parts += [p for p in (cur, para[:cut]) if p]
+            cur, para = "", para[cut:].lstrip("\n")
+        if cur and len(cur) + 2 + len(para) > limit:
+            parts.append(cur)
+            cur = para
+        else:
+            cur = f"{cur}\n\n{para}" if cur else para
+    return [*parts, cur] if cur else parts
+
+
 class Notifier:
     """Оповещения в личку ADMIN_CHAT_ID. Без чата или в dry-run — только лог и файл."""
 

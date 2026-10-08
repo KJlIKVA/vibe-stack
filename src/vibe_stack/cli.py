@@ -62,6 +62,8 @@ def _parser() -> argparse.ArgumentParser:
     se = sub.add_parser("sandbox-export", help="заявки песочницы в JSON (для job без секретов)")
     se.add_argument("--out-file", required=True)
     se.add_argument("--test", default="", help="проверочная заявка без состояния: pypi:<пакет> или npm:<пакет>")
+    ar = sub.add_parser("admin-report", help="отправить отчёт админу в личку Telegram (файл в Telegram HTML)")
+    ar.add_argument("file")
     sa = sub.add_parser("sandbox-apply", help="записать результаты песочницы в состояние")
     sa.add_argument("results")
     sa.add_argument("--requests", required=True, help="requests.json этого запуска (от job plan)")
@@ -85,6 +87,8 @@ def main(argv: list[str] | None = None) -> None:
             code = sandbox_export(args, cfg)
         elif args.command == "sandbox-apply":
             code = sandbox_apply(args, cfg)
+        elif args.command == "admin-report":
+            code = admin_report(args)
         else:
             code = status(args, cfg)
     except MissingSecret as e:
@@ -284,6 +288,24 @@ def sandbox_apply(args: argparse.Namespace, cfg: Config) -> int:
 
 
 # --- служебные ---------------------------------------------------------------------------
+
+def admin_report(args: argparse.Namespace) -> int:
+    """Отчёт о работе (за день, за сессию) — админу в личку от бота. Разметка проверяется до отправки."""
+    from .lint import parse_tg_html
+    from .telegram import split_message
+
+    text = Path(args.file).read_text(encoding="utf-8").strip()
+    if errors := parse_tg_html(text).errors:
+        print(f"отчёт не отправлен: разметка Telegram с ошибками: {', '.join(errors[:5])}", file=sys.stderr)
+        return 2
+    tg = Telegram(env("TELEGRAM_BOT_TOKEN", required=True))
+    chat = env("ADMIN_CHAT_ID", required=True)
+    parts = split_message(text)
+    for part in parts:
+        tg.send_message(chat, part, preview=False)
+    print(f"отчёт отправлен в личку: {len(parts)} сообщ.")
+    return 0
+
 
 def notion_setup(cfg: Config) -> int:
     from .notion_board import NotionBoard
