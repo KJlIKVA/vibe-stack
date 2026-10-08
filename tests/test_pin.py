@@ -72,6 +72,14 @@ def test_navigator_layout(cfg, tmp_path, now) -> None:
         "<b>Видео</b>\n1. V1\n2. V2\n3. V3")
 
 
+def test_navigator_shows_scores(cfg, tmp_path, now) -> None:
+    rt = make_rt(cfg, tmp_path, now)
+    board = FixtureLeaderboard({"key": "arena_text", "label": "Текст", "date": "2026-10-02", "top": ["A", "B", "C"],
+                                "scores": ["1525", "1505", "1504"], "data_url": "https://example.org/arena"})
+    run_pin(rt, [board])
+    assert "<b>Текст</b>\n1. A — 1525\n2. B — 1505\n3. C — 1504" in rt.tg.sent[0][1]
+
+
 def test_deleted_pin_is_recreated(cfg, tmp_path, now) -> None:
     rt = make_rt(cfg, tmp_path, now)
     run_pin(rt, [arena(["A", "B", "C"])])

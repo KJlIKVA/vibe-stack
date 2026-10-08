@@ -8,8 +8,8 @@ from vibe_stack.config import LeaderboardConfig
 from vibe_stack.leaderboards import ArenaAdapter, ArtificialAnalysisAdapter
 
 
-def row(rank, name, cat="overall", date="2026-10-02"):
-    return {"row": {"rank": rank, "model_name": name, "category": cat, "leaderboard_publish_date": date}}
+def row(rank, name, cat="overall", date="2026-10-02", **extra):
+    return {"row": {"rank": rank, "model_name": name, "category": cat, "leaderboard_publish_date": date, **extra}}
 
 
 def arena_with(pages):
@@ -57,6 +57,14 @@ def test_arena_category_block_after_overall() -> None:
     pages[3] = [row(9, "w", cat="creative_writing")]
     assert ArenaAdapter(cfg, httpx.Client(transport=httpx.MockTransport(handler))).fetch() is None
     assert calls == [0, 100, 200, 300]
+
+
+def test_arena_scores_shown_as_in_source() -> None:
+    """Рейтинг места (решение 55): Arena Score — целым, IPS у Agent Arena — тремя знаками, нет числа — пусто."""
+    a, _ = arena_with([[row(1, "a", rating=1525.215), row(2, "b", rating=1504.73), row(3, "c")]])
+    assert a.fetch().scores == ["1525", "1505", ""]
+    a, _ = arena_with([[row(1, "Fable", score=0.14310), row(2, "Opus", score=0.13817), row(3, "Sonnet", score=0.1252)]])
+    assert a.fetch().scores == ["0.143", "0.138", "0.125"]
 
 
 def test_arena_missing_ranks_or_mixed_dates_gives_none() -> None:

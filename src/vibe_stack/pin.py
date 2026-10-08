@@ -32,6 +32,7 @@ class Snapshot(BaseModel):
     label: str
     date: str  # дата данных по источнику (YYYY-MM-DD), не дата нашего запроса
     top: list[str]
+    scores: list[str] = []  # рейтинг каждого места, как в источнике (решение 55): видно разрыв между местами
     data_url: str
     attribution: str = ""  # подпись источника (HTML), обязательна по лицензии/условиям
 
@@ -72,7 +73,9 @@ def render(rt: Runtime, snaps: dict[str, Snapshot], adapters: list[Any]) -> str:
         lines += ["", f'🏆 <b><a href="{url}">Топ моделей</a></b>']
         for s in shown:
             lines += ["", f"<b>{html.escape(s.label)}</b>"]
-            lines += [f"{i}. {html.escape(m)}" for i, m in enumerate(s.top[:3], 1)]
+            scores = s.scores if len(s.scores) == len(s.top) else [""] * len(s.top)
+            lines += [f"{i}. {html.escape(m)}" + (f" — {html.escape(sc)}" if sc else "")
+                      for i, (m, sc) in enumerate(zip(s.top[:3], scores[:3], strict=True), 1)]
         others = [s for s in shown if not s.key.startswith("arena")]
         if others:  # у Artificial Analysis подпись обязательна по их условиям — она остаётся текстом
             lines += ["", f"<i>{DISCLAIMER_FULL}</i>"]

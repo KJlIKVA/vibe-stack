@@ -79,7 +79,17 @@ class ArenaAdapter:
             log.warning("Arena %s: у топ-3 нет общей даты публикации %s", self.config, dates)
             return None  # дату не выдумываем: без неё строка остаётся с прошлыми данными
         return Snapshot(key=self.key, label=self.label, date=dates.pop(), top=[str(x["model_name"]) for x in top],
-                        data_url=HF_PAGE, attribution=ARENA_ATTRIBUTION)
+                        scores=[_score(x) for x in top], data_url=HF_PAGE, attribution=ARENA_ATTRIBUTION)
+
+
+def _score(row: dict[str, Any]) -> str:
+    """Рейтинг места для навигатора: Arena Score (rating, ~1500) — целым числом, IPS-оценка Agent Arena (score,
+    доли единицы) — тремя знаками. Нет числа — пусто, место показывается без рейтинга."""
+    for key, fmt in (("rating", "{:.0f}"), ("score", "{:.3f}")):
+        v = row.get(key)
+        if isinstance(v, int | float):
+            return fmt.format(v)
+    return ""
 
 
 def _iso_date(v: Any) -> str | None:

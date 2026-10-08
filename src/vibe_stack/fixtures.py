@@ -232,7 +232,7 @@ class FixtureLeaderboard:
         if self.spec.get("fail"):
             raise ConnectionError("источник рейтинга недоступен")
         return Snapshot(key=self.key, label=self.spec["label"], date=self.spec["date"], top=self.spec["top"],
-                        data_url=self.spec["data_url"])
+                        scores=self.spec.get("scores", []), data_url=self.spec["data_url"])
 
 
 def check_expected(fx: Fixture, actual: dict[str, Any]) -> list[str]:
