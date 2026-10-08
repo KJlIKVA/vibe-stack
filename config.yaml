@@ -311,6 +311,16 @@ sources:
     media: book
     max_age_days: 180
     include_title_regex: ["\\b(AI|LLMs?|GPT|Claude|Agents?|Agentic|Prompt\\w*|Machine Learning|Copilot|Generative|MCP|DSPy|RAG|Evals?)\\b"]
+  - name: apress-books
+    # Apress (решение 53): новые книги про ИИ находит Open Library, страница книги — Springer по ISBN
+    # (дата выхода, описание, оглавление). Книги «скоро выйдет» отсеивает оценка: не вышла — не рекомендуем.
+    type: openlibrary
+    query: 'publisher:"Apress" AND (subject:"artificial intelligence" OR title:AI OR title:LLM OR title:agents OR title:agentic OR title:generative OR title:prompt OR title:LangChain OR title:MCP OR title:Copilot)'
+    url_template: "https://link.springer.com/book/{isbn}"
+    contours: [collect]
+    media: book
+    max_age_days: 180
+    include_title_regex: ["\\b(AI|LLMs?|GPT|Claude|Agents?|Agentic|Prompt\\w*|Machine Learning|Copilot|Generative|MCP|DSPy|RAG|Evals?|LangChain|LangGraph)\\b"]
   - name: nostarch-books
     # No Starch Press: новинки редко, но бывают практические книги по ИИ
     type: rss

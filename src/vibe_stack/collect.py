@@ -19,7 +19,7 @@ from .steps import doc_guards, gate, merge_batch, prefilter, verify, with_page_t
 
 log = logging.getLogger(__name__)
 CONTOUR = "collect"
-FEED_TYPES = ("rss", "sitemap", "github_releases", "md_changelog", "youtube", "jsonld_list")
+FEED_TYPES = ("rss", "sitemap", "github_releases", "md_changelog", "youtube", "jsonld_list", "openlibrary")
 
 
 def run_collect(rt: Runtime) -> dict[str, Any]:
@@ -166,7 +166,8 @@ def process_candidate(rt: Runtime, c: Candidate, rubrics: dict[str, Rubric]) -> 
     if guards := doc_guards(doc, rt.cfg, rt.now(), max_age):
         return _reject(rt, c, "code_guard", guards)
 
-    score: ScoreResult = rt.llm.json("score", prompts.score_prompt(c.for_prompt(), doc.text), ctx_id=c.id)
+    score: ScoreResult = rt.llm.json("score", prompts.score_prompt(c.for_prompt(), doc.text, rt.today()),
+                                       ctx_id=c.id)
     g = gate(score, rt.cfg, rubrics)
     # объяснение модели — в лог запуска: по нему видно, почему видео или статья «стоит» или «не стоит» поста
     log.info("оценка %s: %s, %s/15, %s — %s", c.url, score.category, g.total, ",".join(g.reasons) or "прошла",

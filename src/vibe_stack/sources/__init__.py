@@ -12,7 +12,7 @@ import httpx
 from ..config import SourceConfig
 from ..models import Candidate
 from ..timeutil import Clock
-from . import github, hackernews, jsonld_list, md_changelog, rss, sitemap, youtube
+from . import github, hackernews, jsonld_list, md_changelog, openlibrary, rss, sitemap, youtube
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +42,8 @@ def build_source(cfg: SourceConfig, client: httpx.Client, clock: Clock, max_age_
             return youtube.YouTubeSource(cfg, client)
         case "jsonld_list":
             return jsonld_list.JsonLdListSource(cfg, client)
+        case "openlibrary":
+            return openlibrary.OpenLibrarySource(cfg, client, clock().year)
     raise ValueError(f"неизвестный тип источника {cfg.type}")
 
 

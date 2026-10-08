@@ -27,7 +27,10 @@ def _key(candidate_id: str) -> str:
 
 
 # og:image некоторых сайтов — уменьшенная копия; в большом превью Telegram она мутная. Берём крупнее.
-_LARGER = [(re.compile(r"^(https://images\.manning\.com/)360/480/resize/"), r"\g<1>720/960/resize/")]
+_LARGER = [
+    (re.compile(r"^(https://images\.manning\.com/)360/480/resize/"), r"\g<1>720/960/resize/"),
+    (re.compile(r"^(https://media\.springernature\.com/)w153/"), r"\g<1>w306/"),  # обложки Apress
+]
 
 
 def larger(url: str) -> str:

@@ -295,6 +295,8 @@ def test_book_post_knows_today_and_gets_larger_cover(cfg, tmp_path, now) -> None
     assert f"Сегодня {rt.today():%d.%m.%Y}." in prompt and "{{сегодня}}" not in prompt
     assert images.larger("https://images.manning.com/360/480/resize/book/a/b/DOTD_x.png") == \
         "https://images.manning.com/720/960/resize/book/a/b/DOTD_x.png"
+    assert images.larger("https://media.springernature.com/w153/springer-static/cover/book/1.jpg") == \
+        "https://media.springernature.com/w306/springer-static/cover/book/1.jpg"
 
 
 def published_video(rt, mid: int, title: str, at: datetime, html: str) -> None:
@@ -439,3 +441,21 @@ def test_book_waits_in_queue_longer_than_news(cfg, tmp_path, now) -> None:
     talk = PostRecord(title="Talk", rubric="book_video", status=Status.APPROVED, source_url="https://y.dev/t",
                       found_at=old, html=VIDEO_POST)
     assert _drop_stale_and_published(rt, [book, talk], now) == [book]
+
+
+# --- решение 53: Apress через Open Library, страница книги — Springer по ISBN -----------------------------
+def test_openlibrary_books_link_to_publisher_page(cfg) -> None:
+    from vibe_stack.sources import build_source, collect_all
+    from vibe_stack.sources.openlibrary import API
+
+    src = next(s for s in cfg.sources if s.name == "apress-books")
+    docs = {"docs": [
+        {"title": "Mastering LangChain and LangGraph", "isbn": ["9798868829451", "x"], "first_publish_year": 2026,
+         "author_name": ["Ankur Kulshreshtha"]},
+        {"title": "Creating ChatGPT Apps", "isbn": ["9798868812200"], "first_publish_year": 2024},  # старая
+        {"title": "No ISBN", "first_publish_year": 2026},
+    ]}
+    now = datetime(2026, 10, 8, tzinfo=UTC)
+    got, errors = collect_all([build_source(src, client({API: docs}), lambda: now, 30)])
+    assert not errors
+    assert [(c.url, c.extra["media"]) for c in got] == [("https://link.springer.com/book/9798868829451", "book")]

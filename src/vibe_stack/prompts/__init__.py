@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from functools import cache
 from importlib import resources
 from typing import Any
@@ -64,12 +65,14 @@ def render(template: str, values: dict[str, str], meta: dict[str, Any] | None = 
     return out
 
 
-def score_prompt(candidate: dict[str, Any], source_document: str) -> str:
-    # решения владельца — отдельным блоком после текста ТЗ (сам текст ТЗ не меняется)
+def score_prompt(candidate: dict[str, Any], source_document: str, today: date | None = None) -> str:
+    # решения владельца — отдельным блоком после текста ТЗ (сам текст ТЗ не меняется); сегодняшняя дата — чтобы
+    # модель не считала «будущей» книгу, вышедшую в сентябре (решение 53)
+    notes = load("score_notes").replace("{{сегодня}}", f"{today:%d.%m.%Y}" if today else "сегодняшнее число")
     return render(load("score_A"), {
         "candidate_json": json.dumps(candidate, ensure_ascii=False),
         "первоисточник, обрезанный": source_document,
-    }).rstrip("\n") + "\n\n" + load("score_notes")
+    }).rstrip("\n") + "\n\n" + notes
 
 
 RUBRIC_NOTES = {"book_video": "book_video_notes"}  # блоки решений владельца к шаблонам C по рубрикам

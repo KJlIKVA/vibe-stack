@@ -175,7 +175,7 @@ class Rubric(BaseModel):
 class SourceConfig(BaseModel):
     name: str
     type: Literal["rss", "github_releases", "github_search", "hackernews", "sitemap", "md_changelog", "youtube",
-                  "jsonld_list", "fixture"]
+                  "jsonld_list", "openlibrary", "fixture"]
     url: str | None = None
     repo: str | None = None
     path_prefix: str | None = None
@@ -198,6 +198,9 @@ class SourceConfig(BaseModel):
     min_minutes: int = 0  # youtube: короче — не берём (0 — без ограничения: длину оценивает модель, решение 51)
     # что за материал (решение 50): у видео, подкастов и книг свои правила оценки «стоит ли это времени»
     media: Literal["video", "podcast", "book"] | None = None
+    # openlibrary: поиск Open Library (новые книги издательства) и адрес страницы книги по ISBN (решение 53)
+    query: str = ""
+    url_template: str = ""
 
 
 class SandboxConfig(BaseModel):
