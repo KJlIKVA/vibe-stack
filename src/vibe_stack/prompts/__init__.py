@@ -80,7 +80,10 @@ def score_prompt(candidate: dict[str, Any], source_document: str, today: date | 
     }).rstrip("\n") + "\n\n" + notes
 
 
-RUBRIC_NOTES = {"book_video": "book_video_notes"}  # блоки решений владельца к шаблонам C по рубрикам
+# блоки решений владельца к шаблонам C по рубрикам; standard_notes — «Подводные камни» и без пустых отсылок
+# к первоисточнику (решение 57)
+RUBRIC_NOTES = {"book_video": "book_video_notes", "tool": "standard_notes", "skill_mcp": "standard_notes",
+                "trick": "standard_notes", "case": "standard_notes"}
 
 
 def rubric_notes(rubric_key: str) -> str | None:

@@ -42,7 +42,7 @@ def template(cfg, key: str) -> str:
     ("tool", "", "#инструмент"),                                                    # подвала не было вовсе
 ])
 def test_footer_replaces_model_footer(cfg, key, tail, tag) -> None:
-    body = "🛠 <b>Tool: что это</b>\n\nСуть.\n<b>Подводный камень:</b> подробности смотрите в первоисточнике."
+    body = "🛠 <b>Tool: что это</b>\n\nСуть.\n<b>Подводные камни:</b> нужен Node.js 22 и ключ провайдера."
     out = footer.apply(body + "\n" + tail, source_url=SRC, rubric=rubric(cfg, key), template=template(cfg, key))
     assert out == body + "\n\n" + NEW_FOOTER + tag
     assert footer.apply(out, source_url=SRC, rubric=rubric(cfg, key), template=template(cfg, key)) == out
@@ -55,6 +55,28 @@ def test_footer_drops_check_mark_in_the_middle(cfg) -> None:
             + f'<a href="{SRC}">Ссылка</a> · #книга')
     out = footer.apply(post, source_url=SRC, rubric=rubric(cfg, "book_video"), template=template(cfg, "book_video"))
     assert out == body + "\n<b>Где взять:</b> по ссылке\n\n" + NEW_FOOTER + "#книга"
+
+
+@pytest.mark.parametrize(("line", "expected"), [
+    # пустая отсылка вместо содержания — строки нет вовсе
+    ("<b>Подводный камень:</b> подробности ограничений смотрите в первоисточнике.", None),
+    ("<b>Как попробовать за 5 минут:</b> в первоисточнике ищите разделы Rollouts и Security Review.", None),
+    # «Подводные камни» во множественном числе; содержательная часть остаётся, отсылка — нет
+    ("<b>Подводный камень:</b> снимок будет регулярно обновляться. Подробности ограничений смотрите в первоисточнике.",
+     "<b>Подводные камни:</b> снимок будет регулярно обновляться."),
+    # «Там указан…» после отсылки — про тот же первоисточник, тоже убираем
+    ("<b>Как попробовать за 5 минут:</b> быстрый старт ищите в первоисточнике по Decisions API. Там указан маршрут "
+     "<code>v1/decisions</code>. Начните с бесплатного тарифа.",
+     "<b>Как попробовать за 5 минут:</b> Начните с бесплатного тарифа."),
+    ("<b>Подводные камни:</b> нужен Node.js 22.", "<b>Подводные камни:</b> нужен Node.js 22."),
+])
+def test_no_empty_pointers_to_source(cfg, line, expected) -> None:
+    """Решение 57: «Подводные камни» — только с содержанием; «смотрите в первоисточнике» не пишем."""
+    head = "🛠 <b>Tool: что это</b>\n\nСуть.\n\n<b>Зачем это вам:</b> экономит время."
+    out = footer.apply(f"{head}\n{line}", source_url=SRC, rubric=rubric(cfg, "tool"), template=template(cfg, "tool"))
+    want = head + (f"\n{expected}" if expected else "")
+    assert out == want + "\n\n" + NEW_FOOTER + "#инструмент"
+    assert "Сверено с" in out  # подвал со ссылкой на первоисточник не трогаем
 
 
 def test_footer_keeps_sandbox_mark_and_escapes_url(cfg) -> None:
