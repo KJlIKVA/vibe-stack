@@ -287,8 +287,7 @@ sources:
     channels: [UCLKPca3kwwd-B59HNr-_lvA, UCrDwWp7EBBv4NwvScIpBDOA, UCXZCJLdBC09xxGZ6gcdrc6A,
                UC_x5XG1OV2P6uZZ5FSM9Ttw, UCP7jMXSY2xbc3KCAE0MHQ-A, UCXUPKJO5MZQN11PqgIvyuvQ,
                UCvi5jNRoRVm436TVAXet1kQ]
-    skip_title_regex: ["#shorts"]
-    min_minutes: 8  # короче — тизеры, нарезки, промо: смотреть «полезное» в них нечего
+    skip_title_regex: ["#shorts"]  # вертикальные клипы Shorts; длину остальных видео не ограничиваем (решение 51)
   # книги (решение 50): правила оценки — «книги» в score_notes.txt; книга актуальна дольше новости — 180 дней
   - name: manning-books
     # у Manning нет RSS: каталог (сортировка «newest») отдаёт 40 последних книг списком JSON-LD; ИИ-книг
