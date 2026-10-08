@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-from .board import Board, LocalBoard, RecordingBoard
+from .board import Board, BoardUnavailable, LocalBoard, RecordingBoard
 from .config import Config, MissingSecret, env, load_config, load_dotenv
 from .fetch import HttpFetcher
 from .llm import LLM, NoLLM, OpenAILLM
@@ -288,7 +288,15 @@ def notion_setup(cfg: Config) -> int:
     assert isinstance(board, NotionBoard)
     created = board.setup()
     print("созданы базы: " + (", ".join(created) if created else "ничего, всё уже есть"))
-    print("В «Настройках» стоит флажок «Пауза» — снимите его, когда будете готовы к публикациям.")
+    try:
+        paused = board.settings().pause
+    except BoardUnavailable as e:
+        print(f"«Настройки» не прочитать: {e}")
+        return 0
+    if paused:
+        print("В «Настройках» стоит флажок «Пауза» — снимите его, когда будете готовы к публикациям.")
+    else:
+        print("Пауза в «Настройках» снята — бот публикует по расписанию.")
     return 0
 
 
