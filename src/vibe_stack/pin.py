@@ -21,10 +21,8 @@ from .telegram import TelegramError
 log = logging.getLogger(__name__)
 
 NAV_TITLE = "📌 Vibe Stack — навигатор"  # так начинается текст навигатора (getChat отдаёт текст без разметки)
-RUBRIC_TAGS = "#инструмент #skill #приём #кейс #срочно #книга #бенчмарк #разбор #словарь #итоги"
-DISCLAIMER_FULL = ("Это три разных взгляда, а не истина: Arena отражает предпочтения людей, "
+DISCLAIMER_FULL = ("Это разные взгляды, а не истина: Arena отражает предпочтения людей, "
                    "индекс Artificial Analysis считается по собственным тестам.")
-DISCLAIMER_ARENA = "Это взгляд, а не истина: Arena отражает предпочтения людей в слепых сравнениях моделей."
 
 
 class Snapshot(BaseModel):
@@ -64,26 +62,26 @@ def refresh_snapshots(rt: Runtime, adapters: list[Any]) -> tuple[dict[str, Snaps
 
 
 def render(rt: Runtime, snaps: dict[str, Snapshot], adapters: list[Any]) -> str:
+    """Навигатор: каждый рейтинг — заголовок и места столбиком, между блоками пустая строка (решение 54)."""
     lines = [f"📌 <b>{NAV_TITLE.removeprefix('📌 ')}</b>"]
     shown = [snaps[a.key] for a in adapters if a.key in snaps]
     if shown:
-        dates = sorted({s.date for s in shown})
-        head = f" (данные на {html.escape(dates[0])})" if len(dates) == 1 else ""  # иначе дата у каждой строки
-        lines += ["", f"🏆 <b>Топ моделей</b>{head}"]
+        # «Топ моделей» — ссылка на данные: это указание источника по CC BY 4.0 (п. 3(a)(2) лицензии разрешает
+        # ссылку на страницу с автором и лицензией), отдельная подпись снизу не нужна
+        url = html.escape(shown[0].data_url, quote=True)
+        lines += ["", f'🏆 <b><a href="{url}">Топ моделей</a></b>']
         for s in shown:
-            top = "  ".join(f"{i}. {html.escape(m)}" for i, m in enumerate(s.top[:3], 1))
-            suffix = f" (данные на {html.escape(s.date)})" if len(dates) > 1 else ""
-            lines.append(f'<a href="{html.escape(s.data_url, quote=True)}">{html.escape(s.label)}</a>{suffix}: {top}')
-        has_aa = any(s.key.startswith("aa") for s in shown)
-        lines.append(f"<i>{DISCLAIMER_FULL if has_aa else DISCLAIMER_ARENA}</i>")
-        for attribution in dict.fromkeys(s.attribution for s in shown if s.attribution):
-            lines.append(f"<i>{attribution}</i>")
+            lines += ["", f"<b>{html.escape(s.label)}</b>"]
+            lines += [f"{i}. {html.escape(m)}" for i, m in enumerate(s.top[:3], 1)]
+        others = [s for s in shown if not s.key.startswith("arena")]
+        if others:  # у Artificial Analysis подпись обязательна по их условиям — она остаётся текстом
+            lines += ["", f"<i>{DISCLAIMER_FULL}</i>"]
+            lines += [f"<i>{a}</i>" for a in dict.fromkeys(s.attribution for s in others if s.attribution)]
     terms = [r["term"] for r in rt.state.glossary_entries()[:5]]
     page = rt.cfg.glossary.telegraph_url or rt.state.get("glossary:page_url")
     if terms:
         tail = f' · <a href="{html.escape(page, quote=True)}">все термины</a>' if page else ""
         lines += ["", f"📖 <b>Словарь:</b> {html.escape(', '.join(terms))}{tail}"]
-    lines += ["", f"🧭 <b>Рубрики:</b> {RUBRIC_TAGS}"]
     return "\n".join(lines)
 
 

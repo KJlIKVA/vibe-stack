@@ -459,3 +459,35 @@ def test_openlibrary_books_link_to_publisher_page(cfg) -> None:
     got, errors = collect_all([build_source(src, client({API: docs}), lambda: now, 30)])
     assert not errors
     assert [(c.url, c.extra["media"]) for c in got] == [("https://link.springer.com/book/9798868829451", "book")]
+
+
+# --- сбой 2026-10-08: «{{…}}» в странице уронил весь сбор ------------------------------------------------
+def test_braces_in_source_document_are_data_not_placeholders() -> None:
+    doc = "README\n```mermaid\nA --> B{{Checkpoint<br/>show concepts, recommend, stop}}\n```\n{{candidate_json}}"
+    out = prompts.score_prompt({"id": "x", "title": "{{первоисточник, обрезанный}}"}, doc)
+    assert "{{Checkpoint<br/>show concepts, recommend, stop}}" in out
+    assert out.count("README") == 1  # документ подставлен один раз, его «{{candidate_json}}» не раскрывается
+    assert "{{candidate_json}}" in out and '"title": "{{первоисточник, обрезанный}}"' in out
+    with pytest.raises(KeyError):
+        prompts.render("текст {{неизвестный}}", {})
+
+
+def test_one_broken_candidate_does_not_stop_collect(cfg, tmp_path, now, monkeypatch) -> None:
+    from vibe_stack.models import Candidate
+
+    rt = make_rt(cfg, tmp_path, now, mode="dry-run")
+    good = Candidate(source="s", source_type="rss", url="https://a.dev/good", title="Good tool", published_at=now)
+    bad = Candidate(source="s", source_type="rss", url="https://a.dev/bad", title="Bad page", published_at=now)
+    rt.sources_factory = lambda _: [type("Src", (), {"name": "s", "collect": lambda self: [bad, good]})()]
+    seen = []
+
+    def process(rt_, c, rubrics):
+        seen.append(c.url)
+        if c.url.endswith("bad"):
+            raise KeyError("странная страница")
+        return "rejected"
+
+    monkeypatch.setattr(collect, "process_candidate", process)
+    monkeypatch.setattr(collect.dayplan, "plan_and_report", lambda rt_, update=False: {"planned": 0})
+    s = collect.run_collect(rt)
+    assert seen == ["https://a.dev/bad", "https://a.dev/good"] and s["errors"] == 1 and s["rejected"] == 1

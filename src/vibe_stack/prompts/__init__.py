@@ -51,17 +51,23 @@ def neutralize(data: str) -> str:
 
 
 def render(template: str, values: dict[str, str], meta: dict[str, Any] | None = None) -> str:
+    """Плейсхолдеры проверяются по шаблону, до подстановки данных, а подстановка — за один проход.
+
+    Данные из интернета могут содержать «{{…}}» (шаблоны, mermaid в README): это не наш незаполненный
+    плейсхолдер, и подставлять в них значения других плейсхолдеров нельзя.
+    """
     out = template.replace(SAFETY_PLACEHOLDER, load("safety").rstrip("\n"))
+    for key in values:
+        if "{{" + key + "}}" not in out:
+            raise KeyError(f"в шаблоне нет {{{{{key}}}}}")
+    if left := [p for p in _LEFTOVER_RE.findall(out) if p[2:-2] not in values]:
+        raise KeyError(f"не подставлены плейсхолдеры: {left}")
+    if values:
+        pattern = re.compile("|".join(re.escape("{{" + k + "}}") for k in values))
+        out = pattern.sub(lambda m: neutralize(values[m.group(0)[2:-2]]), out)
     if meta is not None:
         meta_json = json.dumps(meta, ensure_ascii=False)
-        out = _META_RE.sub(lambda _: f"<meta>{neutralize(meta_json)}</meta>", out)
-    for key, value in values.items():
-        placeholder = "{{" + key + "}}"
-        if placeholder not in out:
-            raise KeyError(f"в шаблоне нет {placeholder}")
-        out = out.replace(placeholder, neutralize(value))
-    if left := _LEFTOVER_RE.findall(out):
-        raise KeyError(f"не подставлены плейсхолдеры: {left}")
+        out = _META_RE.sub(lambda _: f"<meta>{neutralize(meta_json)}</meta>", out, count=1)
     return out
 
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import date
 from typing import Any
 
@@ -35,28 +36,43 @@ AA_ATTRIBUTION = 'Source: Artificial Analysis (<a href="https://artificialanalys
 
 
 class ArenaAdapter:
-    """Топ-3 категории overall из среза latest. Места — колонка rank, дата — leaderboard_publish_date."""
+    """Топ-3 категории (по умолчанию overall) из среза latest. Места — колонка rank, дата — leaderboard_publish_date.
 
-    def __init__(self, cfg: LeaderboardConfig, client: httpx.Client, max_pages: int = 5) -> None:
+    Строки среза идут блоками по категориям (overall — первой), внутри блока — по месту. Листаем страницы, пока
+    не найдём места 1–3 своей категории или не пройдём её блок: для coding это около десяти страниц.
+    """
+
+    def __init__(self, cfg: LeaderboardConfig, client: httpx.Client, max_pages: int = 40) -> None:
         self.key = cfg.key
         self.label = cfg.label
         self.config = cfg.dataset_config or "text_style_control"
+        self.category = cfg.category
         self.client = client
         self.max_pages = max_pages
 
+    def _page(self, page: int) -> list[dict[str, Any]]:
+        params = {"dataset": HF_DATASET, "config": self.config, "split": "latest", "offset": page * 100,
+                  "length": 100}
+        r = self.client.get(HF_ROWS, params=params)
+        if r.status_code == 429:  # частые запросы подряд datasets-server ограничивает — одна пауза и повтор
+            time.sleep(3)
+            r = self.client.get(HF_ROWS, params=params)
+        r.raise_for_status()
+        return [x["row"] for x in r.json().get("rows", [])]
+
     def fetch(self) -> Snapshot | None:
-        overall: list[dict[str, Any]] = []
+        mine: list[dict[str, Any]] = []
         for page in range(self.max_pages):
-            r = self.client.get(HF_ROWS, params={"dataset": HF_DATASET, "config": self.config, "split": "latest",
-                                                 "offset": page * 100, "length": 100})
-            r.raise_for_status()
-            batch = [x["row"] for x in r.json().get("rows", [])]
-            overall += [x for x in batch if x.get("category") == "overall"]
-            if not batch or {1, 2, 3} <= {_rank(x) for x in overall}:
+            batch = self._page(page)
+            here = [x for x in batch if x.get("category") == self.category]
+            if mine and not here:
+                break  # блок категории закончился
+            mine += here
+            if not batch or {1, 2, 3} <= {_rank(x) for x in mine}:
                 break
-        top = sorted(overall, key=_rank)[:3]
+        top = sorted(mine, key=_rank)[:3]
         if [_rank(x) for x in top] != [1, 2, 3]:
-            log.warning("Arena %s: в данных не нашлись места 1–3 категории overall", self.config)
+            log.warning("Arena %s: в данных не нашлись места 1–3 категории %s", self.config, self.category)
             return None
         dates = {_iso_date(x.get("leaderboard_publish_date")) for x in top}
         if len(dates) != 1 or None in dates:

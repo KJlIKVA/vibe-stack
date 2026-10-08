@@ -159,6 +159,7 @@ class LeaderboardConfig(BaseModel):
     type: Literal["arena_hf", "artificial_analysis"]
     label: str
     dataset_config: str | None = None
+    category: str = "overall"  # Arena: категория внутри среза (text_style_control: overall, coding, …)
     enabled: bool = True
 
 

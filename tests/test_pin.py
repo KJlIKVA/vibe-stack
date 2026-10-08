@@ -23,7 +23,7 @@ def make_rt(cfg, tmp_path, now) -> Runtime:
 
 
 def arena(top, date="2026-10-06", fail=False):
-    return FixtureLeaderboard({"key": "arena_text", "label": "Arena · текст", "date": date, "top": top,
+    return FixtureLeaderboard({"key": "arena_text", "label": "Текст", "date": date, "top": top,
                                "data_url": "https://example.org/arena", "fail": fail})
 
 
@@ -31,11 +31,11 @@ def test_create_pin_once_then_edit_only_on_change(cfg, tmp_path, now) -> None:
     rt = make_rt(cfg, tmp_path, now)
     s = run_pin(rt, [arena(["A", "B", "C"])])
     assert s["status"] == "created_and_pinned" and rt.tg.pinned == [-1]
-    assert "1. A  2. B  3. C" in rt.tg.sent[0][1] and "данные на 2026-10-06" in rt.tg.sent[0][1]
+    assert "<b>Текст</b>\n1. A\n2. B\n3. C" in rt.tg.sent[0][1]
     assert run_pin(rt, [arena(["A", "B", "C"])])["status"] == "unchanged"
     s = run_pin(rt, [arena(["B", "A", "C"], date="2026-10-07")])
     assert s["status"] == "edited" and len(rt.tg.sent) == 1 and len(rt.tg.pinned) == 1
-    assert "1. B  2. A" in rt.tg.edited[-1][1]
+    assert "1. B\n2. A" in rt.tg.edited[-1][1]
 
 
 def test_failure_keeps_previous_date(cfg, tmp_path, now) -> None:
@@ -43,19 +43,33 @@ def test_failure_keeps_previous_date(cfg, tmp_path, now) -> None:
     run_pin(rt, [arena(["A", "B", "C"], date="2026-10-05")])
     s = run_pin(rt, [arena([], fail=True)])
     assert s["status"] == "unchanged" and s["problems"]
-    # словарь изменился — закреп правится, но дата рейтинга остаётся прошлой, «свежую» не выдумываем
+    # словарь изменился — закреп правится, а рейтинг остаётся прошлым, «свежий» не выдумываем
     rt.state.add_glossary(term="MCP", source_url="https://x", definition="d", published_at=now, post_url=None)
     s = run_pin(rt, [arena([], fail=True)])
     assert s["status"] == "edited"
     text = rt.tg.edited[-1][1]
-    assert "данные на 2026-10-05" in text and "MCP" in text
+    assert "1. A\n2. B\n3. C" in text and "MCP" in text
 
 
 def test_no_permitted_source_means_no_rating_block(cfg, tmp_path, now) -> None:
     rt = make_rt(cfg, tmp_path, now)
     run_pin(rt, [])
     text = rt.tg.sent[0][1]
-    assert "Топ моделей" not in text and "#инструмент" in text
+    assert "Топ моделей" not in text and text.startswith("📌")
+
+
+def test_navigator_layout(cfg, tmp_path, now) -> None:
+    """Блоки через пустую строку, места столбиком; без дат, оговорок, подписи Arena и рубрик (решение 54).
+    Указание источника по CC BY 4.0 — ссылка в заголовке «Топ моделей»."""
+    rt = make_rt(cfg, tmp_path, now)
+    video = FixtureLeaderboard({"key": "arena_video", "label": "Видео", "date": "2026-09-22", "top": ["V1", "V2", "V3"],
+                                "data_url": "https://example.org/arena"})
+    run_pin(rt, [arena(["A", "B", "C"]), video])
+    assert rt.tg.sent[0][1] == (
+        "📌 <b>Vibe Stack — навигатор</b>\n\n"
+        '🏆 <b><a href="https://example.org/arena">Топ моделей</a></b>\n\n'
+        "<b>Текст</b>\n1. A\n2. B\n3. C\n\n"
+        "<b>Видео</b>\n1. V1\n2. V2\n3. V3")
 
 
 def test_deleted_pin_is_recreated(cfg, tmp_path, now) -> None:

@@ -37,6 +37,28 @@ def test_arena_pages_until_ranks_found() -> None:
     assert a.fetch().top == ["a", "b", "c"] and calls == [0, 100]
 
 
+def test_arena_category_block_after_overall() -> None:
+    """Кодинг — категория coding: её блок идёт после overall и других категорий (решение 54)."""
+    calls = []
+    pages = [[row(1, "o1"), row(2, "o2")], [row(5, "zh", cat="chinese")],
+             [row(1, "c1", cat="coding"), row(2, "c2", cat="coding")], [row(3, "c3", cat="coding")],
+             [row(1, "w", cat="creative_writing")]]
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(int(req.url.params["offset"]))
+        return httpx.Response(200, json={"rows": pages[len(calls) - 1] if len(calls) <= len(pages) else []})
+
+    cfg = LeaderboardConfig(key="arena_coding", type="arena_hf", label="Кодинг", dataset_config="text_style_control",
+                            category="coding")
+    s = ArenaAdapter(cfg, httpx.Client(transport=httpx.MockTransport(handler))).fetch()
+    assert s.top == ["c1", "c2", "c3"] and calls == [0, 100, 200, 300]
+    # блок категории кончился, а мест 1–3 нет — дальше не листаем
+    calls.clear()
+    pages[3] = [row(9, "w", cat="creative_writing")]
+    assert ArenaAdapter(cfg, httpx.Client(transport=httpx.MockTransport(handler))).fetch() is None
+    assert calls == [0, 100, 200, 300]
+
+
 def test_arena_missing_ranks_or_mixed_dates_gives_none() -> None:
     a, _ = arena_with([[row(1, "a"), row(2, "b"), row(4, "d")], []])
     assert a.fetch() is None  # третьего места нет — ничего не выдумываем
@@ -65,7 +87,8 @@ def test_aa_requires_key_and_sorts_by_index(monkeypatch, now) -> None:
 def test_aa_disabled_by_default(cfg) -> None:
     from vibe_stack.leaderboards import build_adapters
 
-    assert [a.key for a in build_adapters(cfg)] == ["arena_text", "arena_webdev"]
+    assert [a.key for a in build_adapters(cfg)] == ["arena_text", "arena_coding", "arena_webdev", "arena_image",
+                                                    "arena_video"]
 
 
 def test_arena_without_valid_date_gives_none() -> None:

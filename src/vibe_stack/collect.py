@@ -100,6 +100,14 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
             summary["errors"] += 1
             rt.decision(CONTOUR, c, "error", "error", ["LLMError"], detail={"error": str(e)[:500]})
             continue
+        except Exception as e:
+            # неожиданная ошибка на одном кандидате (странная страница) не роняет весь сбор: без этого не было бы
+            # ни остальных постов, ни «Слова дня», ни плана дня
+            log.exception("кандидат %s: ошибка обработки", c.url)
+            summary["errors"] += 1
+            rt.decision(CONTOUR, c, "error", "error", [type(e).__name__], detail={"error": str(e)[:500]})
+            rt.state.mark_seen(c.keys, c.id, "error", rt.now())
+            continue
         summary["processed"] += 1
         summary[result] += 1
     if summary["queued"] + summary["pending_approval"] == 0 and not summary["stopped"]:
