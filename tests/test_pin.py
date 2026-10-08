@@ -37,7 +37,7 @@ def test_create_pin_once_then_edit_only_on_change(cfg, tmp_path, now) -> None:
     assert s["status"] == "edited" and len(rt.tg.pinned) == 1
     assert "🥇 B\n🥈 A" in rt.tg.edited[-1][1]
     # места сменились — кроме правки закрепа, в канал вышел короткий пост об изменении (решение 58)
-    assert len(rt.tg.sent) == 2 and "<b>Текст:</b> B — новый лидер, A опустилась на 🥈 место." in rt.tg.sent[1][1]
+    assert len(rt.tg.sent) == 2 and "<b>Текст:</b> B — новый лидер 🥇, A опустилась на 🥈 место." in rt.tg.sent[1][1]
 
 
 def test_failure_keeps_previous_date(cfg, tmp_path, now) -> None:
@@ -166,7 +166,7 @@ def test_ratings_post_layout() -> None:
                   (snap("v", "Видео", ["V1", "V2", "V3"]), snap("v", "Видео", ["V1", "V3", "V2"]))],
                  "https://example.org/arena")
     assert text == ("🏆 <b>Рейтинг моделей изменился</b>\n\n"
-                    "<b>Кодинг:</b> B — новый лидер, A опустилась на 🥈 место.\n\n"
+                    "<b>Кодинг:</b> B — новый лидер 🥇, A опустилась на 🥈 место.\n\n"
                     "<b>Видео:</b> V3 поднялась на 🥈 место, V2 опустилась на 🥉 место.\n\n"
                     'Сверено с <a href="https://example.org/arena">первоисточником</a> ✅')
 
@@ -175,7 +175,7 @@ def test_ratings_change_sentences() -> None:
     from vibe_stack.ratings_post import describe
 
     assert describe(["A", "B", "C"], ["A", "B", "C"]) == []
-    assert describe(["A", "B", "C"], ["B", "A", "C"]) == ["B — новый лидер", "A опустилась на 🥈 место"]
+    assert describe(["A", "B", "C"], ["B", "A", "C"]) == ["B — новый лидер 🥇", "A опустилась на 🥈 место"]
     assert describe(["A", "B", "C"], ["A", "D", "B"]) == ["D вошла в топ-3 на 🥈 место", "B опустилась на 🥉 место",
                                                           "C выбыла из топ-3"]
     assert describe(["A", "B", "C"], ["A", "C", "B"]) == ["C поднялась на 🥈 место", "B опустилась на 🥉 место"]

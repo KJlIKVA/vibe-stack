@@ -35,7 +35,7 @@ def describe(old: list[str], new: list[str]) -> list[str]:
         if before == place:
             continue
         if place == 1:
-            parts.append(f"{name} — новый лидер")
+            parts.append(f"{name} — новый лидер {MEDALS[1]}")
         elif before is None:
             parts.append(f"{name} вошла в топ-3 на {MEDALS[place]} место")
         elif place < before:
