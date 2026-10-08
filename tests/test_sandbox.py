@@ -476,6 +476,7 @@ def stub_env(monkeypatch) -> None:
     monkeypatch.setattr(sandbox_runner, "preflight", lambda: None)
     monkeypatch.setattr(sandbox_runner, "network_up", lambda script: None)
     monkeypatch.setattr(sandbox_runner, "network_down", lambda: None)
+    monkeypatch.setattr(sandbox_runner, "isolation_check", lambda: None)
     monkeypatch.setattr(sandbox_runner, "npm_flags_ok", lambda: True)
     monkeypatch.setattr(sandbox_runner, "low_disk", lambda: None)
 
@@ -523,6 +524,23 @@ def test_runner_refuses_without_gvisor(monkeypatch, tmp_path) -> None:
     out = tmp_path / "results.json"
     assert sandbox_runner.main(["x", str(write(tmp_path / "r.json", reqs(1))), str(out)]) == 3
     assert json.loads(out.read_text()) == []
+
+
+def test_runner_refuses_when_isolation_is_broken(monkeypatch, tmp_path) -> None:
+    stub_env(monkeypatch)
+    monkeypatch.setattr(sandbox_runner, "isolation_check", lambda: "egress: 169.254.169.254:80 открыт")
+    monkeypatch.setattr(sandbox_runner, "sandbox", lambda req, npm_ok: pytest.fail("изоляция нарушена — ничего"))
+    out = tmp_path / "results.json"
+    assert sandbox_runner.main(["x", str(write(tmp_path / "r.json", reqs(1))), str(out)]) == 4
+    assert json.loads(out.read_text()) == []
+
+
+def test_isolation_probe_checks_what_must_be_closed() -> None:
+    probe = sandbox_runner.ISOLATION_PROBE
+    compile(probe, "probe", "exec")
+    for target in ("1.1.1.1", "169.254.169.254", "168.63.129.16", sandbox_runner.INT_GW, sandbox_runner.EGRESS_GW,
+                   "example.com", sandbox_runner.PROXY_IP):
+        assert target in probe
 
 
 def test_npm_without_safety_flags_is_not_installed(monkeypatch) -> None:

@@ -79,10 +79,16 @@ HARDEN = [
 ]
 
 
-def docker_argv(name: str, image: str, args: list[str], *, workdir: str, network: bool, readonly: bool) -> list[str]:
-    """Контейнер с кодом пакета: gVisor, без логов на диске машины; сеть — только внутренняя, через прокси."""
-    net = (["--network", INT_NET, "-e", f"HTTPS_PROXY={PROXY_URL}", "-e", f"HTTP_PROXY={PROXY_URL}"]
-           if network else ["--network", "none"])
+def docker_argv(name: str, image: str, args: list[str], *, workdir: str, network: bool | str,
+                readonly: bool) -> list[str]:
+    """Контейнер с кодом пакета: gVisor, без логов на диске машины; сеть — только внутренняя, через прокси.
+    Строка в network — имя сети (только для проверки изоляции, код пакета так не запускается)."""
+    if isinstance(network, str):
+        net = ["--network", network]
+    elif network:
+        net = ["--network", INT_NET, "-e", f"HTTPS_PROXY={PROXY_URL}", "-e", f"HTTP_PROXY={PROXY_URL}"]
+    else:
+        net = ["--network", "none"]
     return ["docker", "run", "--rm", "--name", name, "--runtime", RUNTIME, "--log-driver", "none", *HARDEN, *net,
             "-v", f"{workdir}:/opt/pkg:{'ro' if readonly else 'rw'}", image, *args]
 
@@ -91,7 +97,7 @@ def _kill(name: str) -> None:
     subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=60)
 
 
-def run(image: str, args: list[str], *, workdir: str, network: bool, readonly: bool,
+def run(image: str, args: list[str], *, workdir: str, network: bool | str, readonly: bool,
         timeout: int) -> tuple[int, str]:
     """Запуск с таймаутом и лимитом вывода: читаем поток сами и храним только хвост."""
     name = f"sbx-{uuid.uuid4().hex[:12]}"
@@ -368,10 +374,81 @@ def network_up(script: Path) -> None:
 
 def network_down() -> None:
     logs = _docker("logs", "--tail", "40", PROXY_NAME)
-    if logs.stdout or logs.stderr:
-        print("журнал прокси (хвост):\n" + tail(logs.stdout + logs.stderr, 3000).replace("proxy:", "\n  proxy:"))
+    lines = [ln.strip() for ln in (logs.stdout + logs.stderr).splitlines() if ln.strip()]
+    if lines:
+        print("журнал прокси (хвост):\n" + "\n".join("  " + tail(ln, 200) for ln in lines))
     _docker("rm", "-f", PROXY_NAME)
     _docker("network", "rm", INT_NET, EGRESS_NET)
+
+
+INT_GW = INT_SUBNET.rsplit(".", 1)[0] + ".1"        # адрес машины во внутренней сети
+EGRESS_GW = EGRESS_SUBNET.rsplit(".", 1)[0] + ".1"
+# Проверка изоляции изнутри контейнеров перед заявками: всё, что должно быть закрыто, закрыто на самом деле.
+# install — контейнер установки (внутренняя сеть, прокси); egress — сеть прокси (страховка iptables из sandbox.yml).
+# Аргументы: режим, версия ядра машины, порт, который машина слушает на время проверки.
+ISOLATION_PROBE = f"""
+import os, socket, sys
+mode, host_release, port = sys.argv[1], sys.argv[2], int(sys.argv[3])
+bad = []
+def reach(h, p):
+    try:
+        socket.create_connection((h, p), timeout=3).close()
+        return True
+    except OSError:
+        return False
+def via_proxy(h):
+    try:
+        s = socket.create_connection(("{PROXY_IP}", {PROXY_PORT}), timeout=10)
+        s.sendall(f"CONNECT {{h}}:443 HTTP/1.1\\r\\nHost: {{h}}:443\\r\\n\\r\\n".encode())
+        return s.recv(64).split(b" ")[1].decode()
+    except (OSError, IndexError):
+        return "-"
+if os.uname().release == host_release:
+    bad.append("ядро машины, а не gVisor")
+if mode == "install":
+    closed = [("1.1.1.1", 443), ("169.254.169.254", 80), ("{INT_GW}", port)]
+    if via_proxy("example.com") != "403":
+        bad.append("прокси пускает example.com")
+    if via_proxy("pypi.org") != "200":
+        bad.append("прокси не пускает pypi.org")
+else:
+    closed = [("169.254.169.254", 80), ("168.63.129.16", 80), ("{EGRESS_GW}", port)]
+    if not reach("1.1.1.1", 443):
+        bad.append("у сети прокси нет интернета")
+for h, p in closed:
+    if reach(h, p):
+        bad.append(f"{{mode}}: {{h}}:{{p}} открыт")
+print("ISOLATION " + ("ok" if not bad else "; ".join(bad)))
+"""
+
+
+def isolation_check() -> str | None:
+    """Проверка изоляции изнутри контейнеров (установки и сети прокси). Возвращает проблему или None."""
+    listener = socket.create_server(("0.0.0.0", 0))  # «служба машины»: из контейнеров должна быть недоступна
+    listener.settimeout(1)
+    port = listener.getsockname()[1]
+    stop = threading.Event()
+
+    def accept() -> None:
+        while not stop.is_set():
+            with contextlib.suppress(OSError):
+                listener.accept()[0].close()
+
+    threading.Thread(target=accept, daemon=True).start()
+    empty = tempfile.mkdtemp(prefix="sbx-probe-", dir=os.environ.get("SBX_ROOT") or None)
+    problems = []
+    try:
+        for mode, network in (("install", True), ("egress", EGRESS_NET)):
+            rc, out = run(PY_IMAGE, ["python", "-I", "-c", ISOLATION_PROBE, mode, os.uname().release, str(port)],
+                          workdir=empty, network=network, readonly=True, timeout=RUN_TIMEOUT)
+            line = next((ln for ln in out.splitlines() if ln.startswith("ISOLATION ")), "")
+            if rc != 0 or line != "ISOLATION ok":
+                problems.append(line.removeprefix("ISOLATION ") or f"{mode}: код {rc}: {tail(out, 200)}")
+    finally:
+        stop.set()
+        listener.close()
+        shutil.rmtree(empty, ignore_errors=True)
+    return "; ".join(problems) or None
 
 
 def npm_flags_ok() -> bool:
@@ -420,6 +497,11 @@ def main(argv: list[str]) -> int:
     start = time.monotonic()
     try:
         network_up(Path(__file__).resolve())
+        if problem := isolation_check():
+            print(f"песочница: изоляция нарушена — {problem}; ничего не запускаю", file=sys.stderr)
+            return 4
+        print("песочница: изоляция проверена (gVisor; у установки нет прямой сети, прокси — только реестры; "
+              "машина, метаданные облака и служебный адрес Azure недоступны)")
         npm_ok = npm_flags_ok()
         if not npm_ok:
             print("песочница: npm не понимает флаги безопасности — npm-пакеты не ставлю", file=sys.stderr)
