@@ -293,10 +293,14 @@ def test_book_post_knows_today_and_gets_larger_cover(cfg, tmp_path, now) -> None
     write(rt, c, "book_video", cfg.rubrics["book_video"], ["a", "b"], mode="standard")
     prompt = next(p for step, ctx, p in rt.llm.calls if step == "write")
     assert f"Сегодня {rt.today():%d.%m.%Y}." in prompt and "{{сегодня}}" not in prompt
-    assert images.larger("https://images.manning.com/360/480/resize/book/a/b/DOTD_x.png") == \
-        "https://images.manning.com/720/960/resize/book/a/b/DOTD_x.png"
-    assert images.larger("https://media.springernature.com/w153/springer-static/cover/book/1.jpg") == \
-        "https://media.springernature.com/w306/springer-static/cover/book/1.jpg"
+    for small in ("https://images.manning.com/360/480/resize/book/a/b/DOTD_x.png",
+                  "https://images.manning.com/720/960/resize/book/a/b/DOTD_x.png"):
+        assert images.larger(small) == "https://images.manning.com/book/a/b/DOTD_x.png"
+    for small in ("https://media.springernature.com/w153/springer-static/cover/book/979-8-8688-2946-8.jpg",
+                  "https://media.springernature.com/w306/springer-static/cover/book/979-8-8688-2946-8.jpg"):
+        assert images.larger(small) == \
+            "https://media.springernature.com/full/springer-static/cover-hires/book/979-8-8688-2946-8"
+    assert images.larger("https://i.ytimg.com/vi/x/maxresdefault.jpg") == "https://i.ytimg.com/vi/x/maxresdefault.jpg"
 
 
 def published_video(rt, mid: int, title: str, at: datetime, html: str) -> None:

@@ -26,10 +26,12 @@ def _key(candidate_id: str) -> str:
     return f"image:{candidate_id}"
 
 
-# og:image некоторых сайтов — уменьшенная копия; в большом превью Telegram она мутная. Берём крупнее.
+# og:image некоторых сайтов — уменьшенная копия; в большом превью Telegram она мутная. Берём оригинал:
+# Manning — баннер книги 1920×1080 вместо 360 px, Springer (Apress) — обложка 827×1180 вместо 153 px.
 _LARGER = [
-    (re.compile(r"^(https://images\.manning\.com/)360/480/resize/"), r"\g<1>720/960/resize/"),
-    (re.compile(r"^(https://media\.springernature\.com/)w153/"), r"\g<1>w306/"),  # обложки Apress
+    (re.compile(r"^(https://images\.manning\.com/)\d+/\d+/resize/(book/)"), r"\g<1>\g<2>"),
+    (re.compile(r"^(https://media\.springernature\.com/)[^/]+/springer-static/cover/book/([\d-]+)\.jpg$"),
+     r"\g<1>full/springer-static/cover-hires/book/\g<2>"),
 ]
 
 
@@ -47,7 +49,8 @@ def remember(rt: Any, candidate_id: str | None, url: str | None) -> None:
 def for_post(rt: Any, post: PostRecord) -> str | None:
     if not rt.cfg.images.enabled or not post.candidate_id:
         return None
-    return rt.state.get(_key(post.candidate_id))
+    url = rt.state.get(_key(post.candidate_id))
+    return larger(url) if url else None  # и для постов, чья картинка записана до замены на оригинал
 
 
 def image_prompt(candidate: dict[str, Any], count: int) -> str:
