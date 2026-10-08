@@ -64,8 +64,10 @@ planner:
   topic_similarity: 0.5       # порог сходства заголовков (Jaccard по словам)
   max_per_domain_per_day: 3   # у репозиториев GitHub «домен» — владелец (github.com/owner)
   weekly_min: {glossary: 1, analysis: 1}
-  weekly_max: {book_video: 7}
-  daily_max: {book_video: 1}  # «Что посмотреть/послушать/почитать» — не больше одного в день
+  weekly_max: {}               # «Книга/видео» — без недельного предела, решает дневной (решение 50)
+  daily_max: {book_video: 1}  # «Что посмотреть/послушать/почитать» — один в день, если есть прошедшее отбор
+  backlog_daily_max: {book_video: 2}  # …а при очереди от backlog_queue таких постов — до двух в день
+  backlog_queue: 5
 
 collect:
   max_candidates_to_score: 60 # сколько кандидатов за запуск идут в LLM (решение 48: было 25, токенов хватает)
@@ -287,12 +289,32 @@ sources:
                UCvi5jNRoRVm436TVAXet1kQ]
     skip_title_regex: ["#shorts"]
     min_minutes: 8  # короче — тизеры, нарезки, промо: смотреть «полезное» в них нечего
+  # книги (решение 50): правила оценки — «книги» в score_notes.txt; книга актуальна дольше новости — 180 дней
+  - name: manning-books
+    # у Manning нет RSS: каталог (сортировка «newest») отдаёт 40 последних книг списком JSON-LD; ИИ-книг
+    # там больше всего, включая ранний доступ (MEAP) — главы выходят до выхода книги
+    type: jsonld_list
+    url: https://www.manning.com/catalog
+    contours: [collect]
+    media: book
+    max_age_days: 180
+    include_title_regex: ["\\b(AI|LLMs?|GPT|Claude|Agents?|Agentic|Prompt\\w*|Machine Learning|Copilot|Generative|MCP|DSPy|RAG|Evals?)\\b"]
   - name: pragprog-books
-    # новые книги Pragmatic Bookshelf — только про ИИ и разработку с ИИ
+    # новые книги Pragmatic Bookshelf — только про ИИ и разработку с ИИ (лента обновляется редко)
     type: rss
     url: https://pragprog.com/feed/global
     contours: [collect]
-    include_title_regex: ["\\b(AI|LLMs?|GPT|Claude|Agents?|Agentic|Prompt\\w*|Machine Learning|Copilot|Generative|MCP)\\b"]
+    media: book
+    max_age_days: 180
+    include_title_regex: ["\\b(AI|LLMs?|GPT|Claude|Agents?|Agentic|Prompt\\w*|Machine Learning|Copilot|Generative|MCP|DSPy|RAG|Evals?)\\b"]
+  - name: nostarch-books
+    # No Starch Press: новинки редко, но бывают практические книги по ИИ
+    type: rss
+    url: https://nostarch.com/rss.xml
+    contours: [collect]
+    media: book
+    max_age_days: 180
+    include_title_regex: ["\\b(AI|LLMs?|GPT|Claude|Agents?|Agentic|Prompt\\w*|Machine Learning|Copilot|Generative|MCP|DSPy|RAG|Evals?)\\b"]
   - name: simon-willison
     type: rss
     url: https://simonwillison.net/atom/everything/

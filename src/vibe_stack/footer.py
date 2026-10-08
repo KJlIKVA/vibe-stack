@@ -51,12 +51,21 @@ def _is_footer_line(line: str) -> bool:
     return False
 
 
+def _is_check_line(line: str) -> bool:
+    """Отметка «✅ Сверено с первоисточником» без другого текста — модель ставит её и посреди поста
+    (у «Книги/видео» после неё идёт «Где взять»)."""
+    plain = html.unescape(_TAG_RE.sub("", line))
+    return "Сверено" in plain and not plain.replace(CHECK, "").replace("Сверено с первоисточником", "") \
+        .replace("Сверено с первоисточник", "").strip(" \t·|—-.ом")
+
+
 def apply(post_html: str, *, source_url: str, rubric: Rubric, template: str = "") -> str:
     """Срезает подвал модели (и старый формат) и ставит единый подвал кода."""
     lines = post_html.rstrip().split("\n")
     found: list[str] = []
     while lines and (not lines[-1].strip() or _is_footer_line(lines[-1])):
         found += _HASHTAG_RE.findall(_TAG_RE.sub("", _LINK_RE.sub("", lines.pop())))
+    lines = [ln for ln in lines if not _is_check_line(ln)]
     allowed = allowed_hashtags(rubric, template)
     tags = [t for t in dict.fromkeys(reversed(found)) if t in allowed] or allowed[:1]
     body = "\n".join(lines).rstrip()

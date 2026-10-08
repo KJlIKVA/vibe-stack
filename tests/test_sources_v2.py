@@ -247,6 +247,23 @@ def test_daily_max_per_rubric(cfg, now) -> None:
     assert res.post is None and "дневной максимум рубрики" in str(res.skipped)
 
 
+@pytest.mark.parametrize(("queued", "allowed"), [(4, False), (5, True), (8, True)])
+def test_backlog_allows_second_post_a_day(cfg, now, queued, allowed) -> None:
+    """Очередь «что посмотреть» от 5 (вместе с вышедшим сегодня) — второй пост в день (решение 50)."""
+    cfg.planner.daily_max, cfg.planner.backlog_daily_max, cfg.planner.backlog_queue = {"book_video": 1}, \
+        {"book_video": 2}, 5
+    hist = [published("Talk A", "book_video", "https://a.dev/1", now - timedelta(hours=2))]
+    q = [post(f"Video {i} unique{i}", "book_video", f"https://v{i}.dev/", score=15, now=now)
+         for i in range(queued - 1)]
+    res = pick_next(q, hist, today=local_date(now, "Europe/Moscow"), now=now, cfg=cfg.planner, rubric_enabled=ENABLED,
+                    soft_rubric_repeat=True)
+    assert (res.post is not None) is allowed
+    hist.append(published("Talk B", "book_video", "https://b.dev/2", now - timedelta(hours=1)))
+    res = pick_next(q, hist, today=local_date(now, "Europe/Moscow"), now=now, cfg=cfg.planner, rubric_enabled=ENABLED,
+                    soft_rubric_repeat=True)
+    assert res.post is None  # третий — нет: при любой очереди не больше двух
+
+
 def test_afternoon_plan_message_only_when_something_was_added(cfg, tmp_path, now) -> None:
     from vibe_stack import dayplan
 
@@ -314,6 +331,45 @@ def test_all_configured_sources_build(cfg, now) -> None:
     assert len(cfg.sources) >= 20
 
 
-@pytest.mark.parametrize("name", ["reddit", "latent-space", "youtube", "pragprog-books", "cursor-changelog"])
+@pytest.mark.parametrize("name", ["reddit", "latent-space", "youtube", "pragprog-books", "cursor-changelog",
+                                  "manning-books", "nostarch-books"])
 def test_new_sources_present(cfg, name) -> None:
     assert any(s.name == name for s in cfg.sources)
+
+
+# --- решение 50: тип материала, книги Manning, свежесть книг -------------------------------------------
+PODCASTS = """<?xml version="1.0"?><rss><channel>
+<item><title>Building evals with a practitioner</title><link>https://www.latent.space/p/evals</link>
+<enclosure url="https://cdn.example/ep.mp3" type="audio/mpeg" length="1"/></item>
+<item><title>AINews: not much happened</title><link>https://www.latent.space/p/ainews</link></item>
+</channel></rss>"""
+
+CATALOG = """<html><script type="application/ld+json">{"@context": "https://schema.org", "@type": "ItemList",
+"itemListElement": [
+ {"@type": "Product", "name": "Evaluating AI Systems", "url": "https://www.manning.com/books/evaluating-ai-systems"},
+ {"@type": "Product", "name": "Rust in Action", "url": "https://www.manning.com/books/rust-in-action"}]}</script></html>"""
+
+
+def test_podcast_is_an_audio_entry(cfg) -> None:
+    src = next(s for s in cfg.sources if s.name == "latent-space")
+    got = {c.title: c.extra.get("media") for c in rss.RSSSource(src, client({src.url: PODCASTS})).collect()}
+    assert got == {"Building evals with a practitioner": "podcast", "AINews: not much happened": None}
+
+
+def test_manning_catalog_books(cfg) -> None:
+    from vibe_stack.sources import build_source, collect_all
+
+    src = next(s for s in cfg.sources if s.name == "manning-books")
+    got, errors = collect_all([build_source(src, client({src.url: CATALOG}), datetime.now, 30)])
+    assert not errors and [(c.title, c.extra["media"]) for c in got] == [("Evaluating AI Systems", "book")]
+    assert got[0].for_prompt()["extra"] == {"media": "book"}  # тип видит модель при оценке
+
+
+def test_book_freshness_uses_source_limit(cfg, now) -> None:
+    from vibe_stack.models import FetchedDoc
+    from vibe_stack.steps import doc_guards
+
+    doc = FetchedDoc(url="https://x", final_url="https://x", ok=True, fetched_at=now, text="книга",
+                     published_meta=(now - timedelta(days=90)).isoformat())
+    assert doc_guards(doc, cfg, now) == ["outdated"]  # новость старше 30 дней — устарела
+    assert doc_guards(doc, cfg, now, max_age_days=180) == []  # книге 3 месяца — нет

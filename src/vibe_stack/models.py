@@ -92,7 +92,8 @@ class Candidate(BaseModel):
             "source": self.source,
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "extra": {k: v for k, v in self.extra.items() if k in ("stars", "points", "topics", "tag", "license")},
+            "extra": {k: v for k, v in self.extra.items()
+                      if k in ("stars", "points", "topics", "tag", "license", "media", "minutes")},
         }
 
 

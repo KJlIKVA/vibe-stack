@@ -74,5 +74,8 @@ class RSSSource:
                 whitelist=self.cfg.whitelist,
                 official_domains=self.cfg.official_domains,
                 signal=1.0 if self.cfg.whitelist else 0.5,
+                # выпуск подкаста — запись с аудио (у Latent Space в одной ленте и статьи, и выпуски)
+                extra={"media": "podcast"} if any(str(x.get("type", "")).startswith("audio/")
+                                                  for x in e.get("enclosures") or []) else {},
             ))
         return out

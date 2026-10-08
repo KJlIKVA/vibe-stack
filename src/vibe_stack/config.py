@@ -93,6 +93,9 @@ class Planner(BaseModel):
     weekly_min: dict[str, int] = Field(default_factory=dict)
     weekly_max: dict[str, int] = Field(default_factory=dict)
     daily_max: dict[str, int] = Field(default_factory=dict)  # не больше стольких постов рубрики в день
+    # большая очередь рубрики (не меньше backlog_queue постов, считая вышедшие сегодня) — дневной максимум выше
+    backlog_daily_max: dict[str, int] = Field(default_factory=dict)
+    backlog_queue: int = 5
 
 
 class Collect(BaseModel):
@@ -168,7 +171,7 @@ class Rubric(BaseModel):
 class SourceConfig(BaseModel):
     name: str
     type: Literal["rss", "github_releases", "github_search", "hackernews", "sitemap", "md_changelog", "youtube",
-                  "fixture"]
+                  "jsonld_list", "fixture"]
     url: str | None = None
     repo: str | None = None
     path_prefix: str | None = None
@@ -189,6 +192,8 @@ class SourceConfig(BaseModel):
     # видео на этих хостах) пропускаем — их страницы роботам закрыты, а первоисточник — по внешней ссылке
     aggregator_hosts: list[str] = Field(default_factory=list)
     min_minutes: int = 0  # youtube: короче — не берём (Shorts, тизеры, нарезки)
+    # что за материал (решение 50): у видео, подкастов и книг свои правила оценки «стоит ли это времени»
+    media: Literal["video", "podcast", "book"] | None = None
 
 
 class SandboxConfig(BaseModel):

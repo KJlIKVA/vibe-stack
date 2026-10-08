@@ -49,6 +49,15 @@ def test_footer_replaces_model_footer(cfg, key, tail, tag) -> None:
     assert footer.apply(out, source_url=SRC, rubric=rubric(cfg, key), template=template(cfg, key)) == out
 
 
+def test_footer_drops_check_mark_in_the_middle(cfg) -> None:
+    """У «Книги/видео» модель ставит «✅ Сверено…» перед «Где взять» — отметка одна, в подвале (решение 50)."""
+    body = "📚 <b>Book</b> — книга.\n\nО чём.\n<b>Сверено:</b> оглавление по ссылке"
+    post = (body + "\n✅ Сверено с первоисточником  \n<b>Где взять:</b> по ссылке\n\n"
+            + f'<a href="{SRC}">Ссылка</a> · #книга')
+    out = footer.apply(post, source_url=SRC, rubric=rubric(cfg, "book_video"), template=template(cfg, "book_video"))
+    assert out == body + "\n<b>Где взять:</b> по ссылке\n\n" + NEW_FOOTER + "#книга"
+
+
 def test_footer_keeps_sandbox_mark_and_escapes_url(cfg) -> None:
     src = "https://example.dev/post?a=1&b=2"
     post = "Текст.\n🧪 Запущено в песочнице: установка и <code>x --help</code>\n✅ Сверено с первоисточником"

@@ -75,8 +75,9 @@ def with_page_title(c: Candidate, doc: FetchedDoc) -> Candidate:
     return c.model_copy(update={"title": _SITE_SUFFIX.sub("", doc.title.strip())})
 
 
-def doc_guards(doc: FetchedDoc, cfg: Config, now: datetime | None = None) -> list[str]:
-    """Проверки кодом по загруженному первоисточнику (now — проверять и даты документа)."""
+def doc_guards(doc: FetchedDoc, cfg: Config, now: datetime | None = None, max_age_days: int | None = None) -> list[str]:
+    """Проверки кодом по загруженному первоисточнику (now — проверять и даты документа; max_age_days —
+    свой предел источника, например у книг)."""
     reasons = []
     if cfg.collect.code_injection_guard and find_injection(doc.text):
         reasons.append("injection_detected")
@@ -84,7 +85,7 @@ def doc_guards(doc: FetchedDoc, cfg: Config, now: datetime | None = None) -> lis
         reasons.append("unsafe_install")
     if now is not None:
         dates = [d for d in (parse_dt(doc.published_meta), parse_dt(doc.updated_meta)) if d]
-        if dates and now - max(dates) > timedelta(days=cfg.gate.max_age_days):
+        if dates and now - max(dates) > timedelta(days=max_age_days or cfg.gate.max_age_days):
             reasons.append("outdated")  # по датам самого источника: старый проект, всплывший на HN
     return reasons
 

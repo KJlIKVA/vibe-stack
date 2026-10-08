@@ -20,8 +20,8 @@ from .timeutil import week_start
 log = logging.getLogger(__name__)
 CONTOUR = "watchlist"
 MIN_ITEMS = 2
-MAX_ITEMS = 7
-MAX_CHARS = 1500
+MAX_ITEMS = 12  # до двух постов в день при большой очереди (решение 50)
+MAX_CHARS = 2500
 _TAG_RE = re.compile(r"<[^>]+>")
 
 

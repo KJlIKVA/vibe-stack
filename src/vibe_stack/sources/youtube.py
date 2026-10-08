@@ -80,7 +80,7 @@ class YouTubeSource:
                     source=self.name, source_type="youtube", url=f"https://www.youtube.com/watch?v={vid}",
                     title=title, summary=f"Длительность: {mins} мин\n{(sn.get('description') or '')[:1500]}",
                     published_at=parse_dt(cd.get("videoPublishedAt") or sn.get("publishedAt")),
-                    signal=0.8, extra={"channel": sn.get("channelTitle") or "", "minutes": mins},
+                    signal=0.8, extra={"channel": sn.get("channelTitle") or "", "minutes": mins, "media": "video"},
                 ))
         return out
 

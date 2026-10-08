@@ -12,7 +12,7 @@ import httpx
 from ..config import SourceConfig
 from ..models import Candidate
 from ..timeutil import Clock
-from . import github, hackernews, md_changelog, rss, sitemap, youtube
+from . import github, hackernews, jsonld_list, md_changelog, rss, sitemap, youtube
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +40,8 @@ def build_source(cfg: SourceConfig, client: httpx.Client, clock: Clock, max_age_
             return md_changelog.MarkdownChangelogSource(cfg, client)
         case "youtube":
             return youtube.YouTubeSource(cfg, client)
+        case "jsonld_list":
+            return jsonld_list.JsonLdListSource(cfg, client)
     raise ValueError(f"неизвестный тип источника {cfg.type}")
 
 
@@ -51,6 +53,10 @@ def collect_all(sources: Iterable[Source]) -> tuple[list[Candidate], dict[str, s
         try:
             got = src.collect()
             log.info("источник %s: %d кандидатов", src.name, len(got))
+            media = getattr(getattr(src, "cfg", None), "media", None)
+            for c in got:  # тип материала — для правил оценки видео, подкастов и книг (решение 50)
+                if m := media or ("video" if youtube.video_id(c.url) else None):
+                    c.extra.setdefault("media", m)
             out.extend(got)
         except Exception as e:
             log.warning("источник %s недоступен: %s", src.name, e)

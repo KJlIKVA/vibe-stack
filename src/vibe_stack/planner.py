@@ -86,6 +86,17 @@ def pick_next(
     for h in history:
         if h.local_date == today:
             rubric_today[h.rubric] = rubric_today.get(h.rubric, 0) + 1
+    queued: dict[str, int] = {}
+    for p in queue:
+        queued[p.rubric] = queued.get(p.rubric, 0) + 1
+
+    def daily_limit(rubric: str) -> int | None:
+        """Дневной максимум; при большой очереди (решение 50) — выше. Очередь считаем с вышедшими сегодня:
+        иначе каждый выпущенный пост уменьшал бы её, и очередь ровно из backlog_queue давала бы один пост."""
+        if (bmx := cfg.backlog_daily_max.get(rubric)) is not None and \
+                queued.get(rubric, 0) + rubric_today.get(rubric, 0) >= cfg.backlog_queue:
+            return bmx
+        return cfg.daily_max.get(rubric)
     wk = week_start(today)
     week_counts: dict[str, int] = {}
     for h in history:
@@ -110,7 +121,7 @@ def pick_next(
             reasons.append(f"домен {domain} уже был сегодня")
         if (mx := weekly_max.get(p.rubric)) is not None and week_counts.get(p.rubric, 0) >= mx:
             reasons.append("недельный максимум рубрики")
-        if (dmx := cfg.daily_max.get(p.rubric)) is not None and rubric_today.get(p.rubric, 0) >= dmx:
+        if (dmx := daily_limit(p.rubric)) is not None and rubric_today.get(p.rubric, 0) >= dmx:
             reasons.append("дневной максимум рубрики")
         toks = topic_tokens(p.title, p.source_url)
         canon = canonical_url(p.source_url) if p.source_url else ""

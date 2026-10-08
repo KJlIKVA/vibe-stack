@@ -19,7 +19,7 @@ from .steps import doc_guards, gate, merge_batch, prefilter, verify, with_page_t
 
 log = logging.getLogger(__name__)
 CONTOUR = "collect"
-FEED_TYPES = ("rss", "sitemap", "github_releases", "md_changelog", "youtube")
+FEED_TYPES = ("rss", "sitemap", "github_releases", "md_changelog", "youtube", "jsonld_list")
 
 
 def run_collect(rt: Runtime) -> dict[str, Any]:
@@ -162,7 +162,8 @@ def process_candidate(rt: Runtime, c: Candidate, rubrics: dict[str, Rubric]) -> 
         rt.decision(CONTOUR, c, "fetch", "fetch_failed", ["source_unavailable"], detail={"error": doc.error})
         return "fetch_failed"
     c = with_page_title(c, doc)
-    if guards := doc_guards(doc, rt.cfg, rt.now()):
+    max_age = next((s.max_age_days for s in rt.cfg.sources if s.name == c.source), None)
+    if guards := doc_guards(doc, rt.cfg, rt.now(), max_age):
         return _reject(rt, c, "code_guard", guards)
 
     score: ScoreResult = rt.llm.json("score", prompts.score_prompt(c.for_prompt(), doc.text), ctx_id=c.id)
