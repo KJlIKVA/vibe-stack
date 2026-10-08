@@ -10,6 +10,7 @@ import hashlib
 import html
 import json
 import logging
+import re
 from typing import Any
 
 from pydantic import BaseModel
@@ -24,6 +25,40 @@ MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}  # места в навигаторе
 NAV_TITLE = "📌 Vibe Stack — навигатор"  # так начинается текст навигатора (getChat отдаёт текст без разметки)
 DISCLAIMER_FULL = ("Это разные взгляды, а не истина: Arena отражает предпочтения людей, "
                    "индекс Artificial Analysis считается по собственным тестам.")
+
+
+_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max", "thinking", "nothinking", "reasoning"}
+_BRANDS = {"gpt": "GPT", "claude": "Claude", "gemini": "Gemini", "grok": "Grok", "flux": "FLUX", "llama": "Llama",
+           "qwen": "Qwen", "deepseek": "DeepSeek", "mistral": "Mistral", "kimi": "Kimi", "glm": "GLM", "veo": "Veo",
+           "sora": "Sora", "kling": "Kling", "hunyuan": "Hunyuan", "seedream": "Seedream", "imagen": "Imagen",
+           "minimax": "MiniMax", "ideogram": "Ideogram", "recraft": "Recraft", "midjourney": "Midjourney"}
+
+
+def pretty_model(name: str) -> str:
+    """Имя модели из датасета → по-человечески (решение 59): «claude-opus-4-6-high» → «Claude Opus 4.6 (high)»,
+    «gpt-6-astra-max» → «GPT-6 Astra (max)». Уже читаемые имена (с заглавными или пробелами) не трогаем."""
+    tail = ""
+    if " (" in name and name.endswith(")"):
+        name, tail = name.split(" (", 1)
+        tail = f" ({tail}"
+    if any(ch.isupper() for ch in name) or " " in name:
+        return name + tail
+    date = ""
+    if m := re.search(r"-(\d{4}-\d{2}-\d{2})$", name):  # «gpt-4o-2024-05-13» — дата снимка остаётся датой
+        name, date = name[:m.start()], " " + m.group(1)
+    tokens = [t for t in name.split("-") if t]
+    effort = ""
+    if len(tokens) >= 3 and tokens[-1] in _EFFORTS:  # «qwen3-max» — это название, а не уровень рассуждения
+        effort = f" ({tokens.pop()})"
+    words: list[str] = []
+    for t in tokens:
+        if words and re.fullmatch(r"\d{1,2}", t) and re.fullmatch(r"\d{1,2}", words[-1]):
+            words[-1] += "." + t  # «4-6» → «4.6»
+        elif words and words[-1] == "GPT" and t[:1].isdigit():
+            words[-1] += "-" + t  # «gpt-6» → «GPT-6»
+        else:
+            words.append(_BRANDS.get(t, t if t[:1].isdigit() else t.capitalize()))
+    return " ".join(words) + date + effort + tail
 
 
 class Snapshot(BaseModel):
@@ -75,7 +110,8 @@ def render(rt: Runtime, snaps: dict[str, Snapshot], adapters: list[Any]) -> str:
         for s in shown:
             lines += ["", f"<b>{html.escape(s.label)}</b>"]
             scores = s.scores if len(s.scores) == len(s.top) else [""] * len(s.top)
-            lines += [f"{MEDALS.get(i, f'{i}.')} {html.escape(m)}" + (f" — {html.escape(sc)}" if sc else "")
+            lines += [f"{MEDALS.get(i, f'{i}.')} {html.escape(pretty_model(m))}"
+                      + (f" — {html.escape(sc)}" if sc else "")
                       for i, (m, sc) in enumerate(zip(s.top[:3], scores[:3], strict=True), 1)]
         others = [s for s in shown if not s.key.startswith("arena")]
         if others:  # у Artificial Analysis подпись обязательна по их условиям — она остаётся текстом

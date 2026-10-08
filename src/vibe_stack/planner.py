@@ -20,7 +20,8 @@ _STOP = {
 
 
 def topic_tokens(title: str, url: str = "") -> set[str]:
-    words = re.findall(r"[a-zа-яё0-9][a-zа-яё0-9+.#-]{2,}", title.lower())
+    # короткие числа тоже слова темы: «Mistral Large 4» и «Mistral Large 3» — разные модели
+    words = re.findall(r"[a-zа-яё0-9][a-zа-яё0-9+.#-]{2,}|\d+(?:\.\d+)*", title.lower())
     tokens = {w.strip(".-") for w in words if w not in _STOP}
     if repo := github_repo(url):
         tokens.add(f"repo:{repo}")
@@ -57,6 +58,27 @@ def same_topic(a: set[str], b: set[str], threshold: float) -> bool:
     if repos_a and repos_a & b:
         return True
     return len(a & b) / len(a | b) >= threshold
+
+
+def same_news(a: set[str], b: set[str]) -> bool:
+    """Строже same_topic — для отсева до оценки (решение 59): ошибка здесь стоит потерянной новости.
+
+    Общий репозиторий не в счёт (claude-code v2.1.293 и v2.1.294 — разные выпуски), разные числа — разные
+    новости (раунды инвестиций, версии). Одна новость — почти одинаковые заголовки или короткий заголовок,
+    целиком входящий в длинный, если совпадает номер версии или хотя бы три слова.
+    """
+    a = {t for t in a if not t.startswith("repo:")}
+    b = {t for t in b if not t.startswith("repo:")}
+    common = a & b
+    if len(common) < 2:
+        return False
+    nums_a = {t for t in a if any(ch.isdigit() for ch in t)}
+    nums_b = {t for t in b if any(ch.isdigit() for ch in t)}
+    if nums_a and nums_b and not (nums_a <= nums_b or nums_b <= nums_a):
+        return False
+    if len(common) / len(a | b) >= 0.8:
+        return True
+    return len(common) / min(len(a), len(b)) >= 0.8 and (bool(common & nums_a) or len(common) >= 3)
 
 
 @dataclass
@@ -159,7 +181,7 @@ def pick_next(
         found = p.found_at.timestamp() if p.found_at else 0.0
         repeat = 1 if last_rubric and p.rubric == last_rubric else 0
         # 1) рубрики с невыполненной недельной квотой, 2) другая рубрика, чем у предыдущего поста,
-        # 3) баллы, 4) кто дольше ждёт
-        return (0 if need > 0 else 1, repeat, -(p.score or 0), found)
+        # 3) баллы, 4) свежее — раньше (решение 59: важнее, чтобы вышло недавнее)
+        return (0 if need > 0 else 1, repeat, -(p.score or 0), -found)
 
     return Pick(min(ok, key=priority), skipped)

@@ -42,7 +42,7 @@ def test_digest_counts_and_sends_once(cfg, tmp_path) -> None:
     assert run_digest(rt)["status"] == "sent"
     text = rt.notifier.sent[-1]
     assert "Сводка за 07.10" in text and "Пауза" in text
-    assert "Вышло: 3 из 24" in text and "🛠 Инструмент — 2, 💡 Приём — 1" in text
+    assert "Вышло: 3 из 32" in text and "🛠 Инструмент — 2, 💡 Приём — 1" in text
     assert "Ждут вашего одобрения в Notion: 1" in text and "Разбор статьи про агентов" in text
     assert "В очереди: 1 одобренных" in text
     assert "500 000 из 2 000 000 (25%)" in text

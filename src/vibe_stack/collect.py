@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from datetime import timedelta
@@ -14,7 +15,7 @@ from .llm import BudgetExceeded, LLMError
 from .models import HARD_STOPS, Candidate, PostRecord, ScoreResult, Status
 from .runtime import Runtime
 from .sources import collect_all
-from .steps import doc_guards, gate, merge_batch, prefilter, verify, with_page_title, write
+from .steps import _SOURCE_RANK, doc_guards, gate, merge_batch, prefilter, verify, with_page_title, write
 
 log = logging.getLogger(__name__)
 CONTOUR = "collect"
@@ -68,6 +69,7 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
             continue
         passed.append(c)
 
+    passed = drop_repeated_topics(rt, passed)
     chosen, rest = fair_pick(passed, rt.cfg.collect.max_candidates_to_score, rt.cfg.collect.max_per_source)
     for c in rest:
         rt.decision(CONTOUR, c, "deferred", "deferred", ["over_max_candidates_to_score"])
@@ -118,6 +120,38 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
     return summary
 
 
+def drop_repeated_topics(rt: Runtime, cands: list[Candidate]) -> list[Candidate]:
+    """Одна новость из разных источников (анонс, пересказ в блоге, пост на Reddit) оценивается один раз (решение 59).
+
+    Новость уже в очереди, недавно вышла или есть у кандидата получше в этом же сборе — модель на повтор не
+    тратим. Правило строже планировщика (same_news): лишняя оценка дешевле потерянной новости. Остаётся лучший:
+    белый список и первоисточник раньше пересказа, затем сигнал источника. Видео, подкасты и книги не
+    сравниваются: ролик о новости — отдельный пост «что посмотреть», а не повтор.
+    """
+    from .planner import same_news, topic_tokens
+
+    cutoff = rt.now() - timedelta(days=rt.cfg.planner.topic_repeat_days)
+    known = [topic_tokens(h.title, h.source_url) for h in rt.state.published_since(cutoff.date())]
+    with contextlib.suppress(BoardUnavailable):  # без очереди сравним с вышедшим и внутри сбора
+        known += [topic_tokens(p.title, p.source_url) for p in rt.board.posts_with_status(Status.APPROVED)]
+    kept: list[Candidate] = []
+    kept_topics: list[set[str]] = []
+    for c in sorted(cands, key=lambda c: (0 if c.whitelist else 1, _SOURCE_RANK.get(c.source_type, 3), -c.signal)):
+        if c.extra.get("media"):
+            kept.append(c)
+            continue
+        topic = topic_tokens(c.title, c.url)
+        if any(same_news(topic, t) for t in known + kept_topics):
+            rt.decision(CONTOUR, c, "dedup", "rejected", ["duplicate_topic"])
+            rt.state.mark_seen(c.keys, c.id, "rejected", rt.now())
+            continue
+        kept.append(c)
+        kept_topics.append(topic)
+    if dropped := len(cands) - len(kept):
+        log.info("повторы тем до оценки: %d из %d", dropped, len(cands))
+    return [c for c in cands if any(c is k for k in kept)]  # порядок прежний
+
+
 def collect_half(rt: Runtime) -> str:
     """«am» — утренний сбор, «pm» — дневной (по времени канала)."""
     from zoneinfo import ZoneInfo
@@ -126,9 +160,15 @@ def collect_half(rt: Runtime) -> str:
 
 
 def fair_pick(cands: list[Candidate], limit: int, per_source: int) -> tuple[list[Candidate], list[Candidate]]:
-    """Источники по очереди, внутри источника — по сигналу (звёзды, очки). Остальное ждёт следующего запуска."""
+    """Источники по очереди, внутри источника — сначала самое свежее (по дню), потом по сигналу (звёзды, очки).
+    Свежее не должно ждать, пока модель оценивает недельный хвост ленты (решение 59). Остальное ждёт
+    следующего запуска."""
+    def order(c: Candidate) -> tuple[int, float]:
+        day = c.freshest.date().toordinal() if c.freshest else 10**7  # без даты (каталог) — как самое свежее
+        return (-day, -c.signal)
+
     by_source: dict[str, list[Candidate]] = {}
-    for c in sorted(cands, key=lambda c: -c.signal):
+    for c in sorted(cands, key=order):
         by_source.setdefault(c.source, []).append(c)
     chosen: list[Candidate] = []
     rnd = 0

@@ -493,3 +493,91 @@ def test_one_broken_candidate_does_not_stop_collect(cfg, tmp_path, now, monkeypa
     monkeypatch.setattr(collect.dayplan, "plan_and_report", lambda rt_, update=False: {"planned": 0})
     s = collect.run_collect(rt)
     assert seen == ["https://a.dev/bad", "https://a.dev/good"] and s["errors"] == 1 and s["rejected"] == 1
+
+
+# --- решение 59: свежее первым, повторы тем до оценки, Архив при таймауте, имена моделей -------------------
+def test_fresh_candidates_first_within_source(now) -> None:
+    from vibe_stack.models import Candidate
+
+    def cand(title, days, signal=0.5):
+        return Candidate(source="s", source_type="rss", url=f"https://a.dev/{title}", title=title, signal=signal,
+                         published_at=now - timedelta(days=days))
+
+    chosen, rest = collect.fair_pick([cand("old-popular", 20, 0.9), cand("fresh", 0), cand("week", 7)], 2, 8)
+    assert [c.title for c in chosen] == ["fresh", "week"] and [c.title for c in rest] == ["old-popular"]
+
+
+def test_same_news_from_several_sources_scored_once(cfg, tmp_path, now) -> None:
+    from vibe_stack.models import Candidate
+
+    rt = make_rt(cfg, tmp_path, now, mode="dry-run")
+    official = Candidate(source="anthropic-news", source_type="sitemap", title="Introducing Claude Haiku 5.5",
+                         url="https://www.anthropic.com/news/haiku-5-5", whitelist=True, published_at=now)
+    blog = Candidate(source="simon-willison", source_type="rss", url="https://simonwillison.net/2026/haiku",
+                     title="Claude Haiku 5.5", published_at=now)
+    other = Candidate(source="hn", source_type="hackernews", url="https://x.dev/tool",
+                      title="A new terminal for agents", published_at=now)
+    rt.state.record_published(ref="r1", rubric="tool", urgent=False, title="Terminal agents: a new terminal",
+                              source_url="https://y.dev/t", domain="y.dev", published_at=now - timedelta(days=1),
+                              day=local_date(now - timedelta(days=1), rt.tz), slot=None, tg_message_id=5,
+                              counts_regular=True)
+    kept = collect.drop_repeated_topics(rt, [blog, other, official])
+    assert kept == [official]  # пересказ в блоге — повтор анонса; терминал уже выходил вчера
+
+
+def test_different_news_are_not_merged_before_scoring() -> None:
+    """Ложные склейки из реального сбора 08.10: соседние выпуски, разные партнёрства, разные раунды."""
+    from vibe_stack.planner import same_news, topic_tokens
+
+    def same(x: tuple[str, str], y: tuple[str, str]) -> bool:
+        return same_news(topic_tokens(*x), topic_tokens(*y))
+
+    rel = "https://github.com/anthropics/claude-code/releases/tag/"
+    assert not same(("anthropics/claude-code v2.1.293", rel + "v2.1.293"),
+                    ("anthropics/claude-code v2.1.294", rel + "v2.1.294"))
+    assert not same(("anthropic accenture partnership", ""), ("tcs anthropic partnership", ""))
+    assert not same(("anthropic raises 30 billion series g funding", ""),
+                    ("anthropic raises series f at usd183b post money valuation", ""))
+    assert not same(("llama : add a GPU cache for MoE experts", "https://github.com/ggml-org/llama.cpp/pull/1"),
+                    ("feat: add GLM5Next MTP", "https://github.com/ggml-org/llama.cpp/pull/2"))
+    assert same(("Mistral Large 4", ""), ("Introducing Mistral Large 4", ""))
+    assert not same(("Mistral Large 3", ""), ("Mistral Large 4", ""))
+    assert same(("Claude Haiku 5.5 in GitHub Copilot", ""), ("Claude Haiku 5.5", ""))
+
+
+def test_video_about_the_news_is_not_a_duplicate(cfg, tmp_path, now) -> None:
+    from vibe_stack.models import Candidate
+
+    rt = make_rt(cfg, tmp_path, now, mode="dry-run")
+    post = Candidate(source="deepmind", source_type="rss", title="AlphaGenome Atlas: understanding the human genome",
+                     url="https://deepmind.google/blog/alphagenome-atlas", whitelist=True, published_at=now)
+    video = Candidate(source="youtube", source_type="youtube", title=post.title,
+                      url="https://www.youtube.com/watch?v=abc", published_at=now, extra={"media": "video"})
+    assert collect.drop_repeated_topics(rt, [post, video]) == [post, video]
+
+
+def test_archive_on_timeout_for_blocked_site(cfg, now) -> None:
+    calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(str(req.url))
+        if "web.archive.org" in str(req.url):
+            page = "<html><head><title>GPT</title></head><body><p>GPT-6 is here</p></body></html>"
+            return httpx.Response(200, text=page, headers={"content-type": "text/html"})
+        raise httpx.ReadTimeout("timed out", request=req)
+
+    cfg.fetch.archive_fallback_hosts = ["openai.com"]
+    doc = HttpFetcher(cfg.fetch, lambda: now, httpx.Client(transport=httpx.MockTransport(handler)),
+                      check_urls=False).fetch("https://openai.com/index/gpt-6", purpose="score")
+    assert doc.ok and "GPT-6 is here" in doc.text and any("web.archive.org" in c for c in calls)
+
+
+def test_pretty_model_names() -> None:
+    from vibe_stack.pin import pretty_model
+
+    assert pretty_model("claude-opus-4-6-high") == "Claude Opus 4.6 (high)"
+    assert pretty_model("gpt-6-astra-max") == "GPT-6 Astra (max)"
+    assert pretty_model("gpt-image-2 (medium)") == "GPT Image 2 (medium)"
+    assert pretty_model("qwen3-max") == "Qwen3 Max"  # два слова — название, а не уровень рассуждения
+    assert pretty_model("gpt-4o-2024-05-13") == "GPT-4o 2024-05-13"
+    assert pretty_model("Claude Fable 5.1 (Max)") == "Claude Fable 5.1 (Max)"

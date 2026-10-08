@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 from .footer import CHECK
-from .pin import MEDALS, Snapshot
+from .pin import MEDALS, Snapshot, pretty_model
 from .runtime import Runtime
 from .telegram import TelegramError
 from .urls import host_of
@@ -30,7 +30,7 @@ def describe(old: list[str], new: list[str]) -> list[str]:
     """Изменения мест в топ-3: кто вошёл, поднялся, опустился, выбыл. Пусто — места не менялись."""
     parts = []
     for place, model in enumerate(new[:3], 1):
-        name = html.escape(model)
+        name = html.escape(pretty_model(model))
         before = old.index(model) + 1 if model in old[:3] else None
         if before == place:
             continue
@@ -42,7 +42,7 @@ def describe(old: list[str], new: list[str]) -> list[str]:
             parts.append(f"{name} поднялась на {MEDALS[place]} место")
         else:
             parts.append(f"{name} опустилась на {MEDALS[place]} место")
-    parts += [f"{html.escape(m)} выбыла из топ-3" for m in old[:3] if m not in new[:3]]
+    parts += [f"{html.escape(pretty_model(m))} выбыла из топ-3" for m in old[:3] if m not in new[:3]]
     return parts
 
 

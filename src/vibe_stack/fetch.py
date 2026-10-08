@@ -110,10 +110,17 @@ class HttpFetcher:
         raise ValueError("слишком много редиректов")
 
     def _generic(self, url: str) -> FetchedDoc:
-        status, ctype, raw, final_url = self._get(url)
+        fallback = any(same_site(host_of(url), h) for h in self.cfg.archive_fallback_hosts)
+        try:
+            status, ctype, raw, final_url = self._get(url)
+        except httpx.TimeoutException:
+            if not fallback:
+                raise
+            status, ctype, raw, final_url = 408, "", "", url  # сайт не ответил вовремя — как отказ (решение 59)
         archived = False
-        if status == 403 and any(same_site(host_of(url), h) for h in self.cfg.archive_fallback_hosts):
-            # сайт не пускает роботов из облака (openai.com) — берём последнюю копию страницы из Архива интернета
+        if status in (403, 408) and fallback:
+            # сайт не пускает роботов из облака или не отвечает (openai.com) — берём последнюю копию страницы
+            # из Архива интернета
             a_status, a_ctype, a_raw, _ = self._get(f"https://web.archive.org/web/2id_/{url}")
             if a_status < 400 and a_raw:
                 status, ctype, raw, archived = a_status, a_ctype, a_raw, True
