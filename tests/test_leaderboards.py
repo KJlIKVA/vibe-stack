@@ -87,8 +87,8 @@ def test_aa_requires_key_and_sorts_by_index(monkeypatch, now) -> None:
 def test_aa_disabled_by_default(cfg) -> None:
     from vibe_stack.leaderboards import build_adapters
 
-    assert [a.key for a in build_adapters(cfg)] == ["arena_text", "arena_coding", "arena_webdev", "arena_image",
-                                                    "arena_video"]
+    assert [a.key for a in build_adapters(cfg)] == ["arena_text", "arena_coding", "arena_webdev", "arena_agent",
+                                                    "arena_image", "arena_video"]
 
 
 def test_arena_without_valid_date_gives_none() -> None:

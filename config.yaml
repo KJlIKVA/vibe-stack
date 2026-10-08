@@ -147,10 +147,13 @@ glossary:
 leaderboards:
   # Arena (датасет lmarena-ai/leaderboard-dataset): текст — общий рейтинг в чате; кодинг — категория coding
   # того же рейтинга (вопросы про код: скрипты, функции, отладка); WebDev — Code Arena: модель собирает сайт или
-  # веб-приложение по описанию, люди сравнивают готовый результат; изображения и видео — генерация по тексту.
+  # веб-приложение по описанию, люди сравнивают готовый результат; агенты — Agent Arena: модель с инструментами
+  # сама выполняет задачу (код, анализ) в Agent Mode на arena.ai, рейтинг считается по реальным сессиям;
+  # изображения и видео — генерация по тексту.
   - {key: arena_text, type: arena_hf, label: "Текст", dataset_config: text_style_control}
   - {key: arena_coding, type: arena_hf, label: "Кодинг", dataset_config: text_style_control, category: coding}
   - {key: arena_webdev, type: arena_hf, label: "WebDev — сайты и приложения", dataset_config: webdev}
+  - {key: arena_agent, type: arena_hf, label: "Агенты", dataset_config: agent}
   - {key: arena_image, type: arena_hf, label: "Изображения", dataset_config: text_to_image}
   - {key: arena_video, type: arena_hf, label: "Видео", dataset_config: text_to_video}
   # Условия API Artificial Analysis не разрешают ежедневный топ без письменного согласия.
