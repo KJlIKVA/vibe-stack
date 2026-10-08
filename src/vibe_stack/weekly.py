@@ -50,7 +50,7 @@ def post_link(rt: Runtime, message_id: int | None) -> str | None:
 def compute_stats(rt: Runtime) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     end = rt.today()
     start = end - timedelta(days=6)
-    # «Слово дня» — не находки из источников: попытки по терминам в «просмотрено/отклонено» не считаем
+    # «Слово дня» (отменено решением 56) — не находки из источников: его старые попытки в статистику не идут
     rows = [r for r in rt.state.candidates_between(start, end)
             if r["stage"] not in ("dedup", "deferred") and r["contour"] != "glossary"]
     seen_ids = {r["id"] for r in rows}

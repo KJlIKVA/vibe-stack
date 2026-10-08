@@ -17,7 +17,6 @@ from zoneinfo import ZoneInfo
 from .board import (
     BoardSettings,
     BoardUnavailable,
-    GlossaryEntry,
     RubricOverride,
     SourceOverride,
     validate_settings,
@@ -32,7 +31,6 @@ T = TypeVar("T")
 DB_POSTS = "Posts"
 DB_RUBRICS = "Rubrics"
 DB_SOURCES = "Sources"
-DB_GLOSSARY = "Glossary"
 DB_LEADERBOARD = "Leaderboard history"
 DB_SETTINGS = "Настройки"
 MODE_TO_NOTION = {"auto": "авто", "approve": "approve"}
@@ -111,13 +109,6 @@ SCHEMAS: dict[str, Callable[[Config], dict[str, Any]]] = {
                                        ("rss", "github_releases", "github_search", "hackernews", "sitemap")]}},
         "Белый список": {"checkbox": {}},
         "Включён": {"checkbox": {}},
-    },
-    DB_GLOSSARY: lambda cfg: {
-        "Термин": {"title": {}},
-        "Определение": {"rich_text": {}},
-        "Источник": {"url": {}},
-        "Дата публикации": {"date": {}},
-        "Ссылка на пост": {"url": {}},
     },
     DB_LEADERBOARD: lambda cfg: {
         "Запись": {"title": {}},
@@ -374,30 +365,6 @@ class NotionBoard:
         props = self._props(fields)
         self._write("обновить строку поста", lambda: self.client.pages.update(page_id=ref, properties=props),
                     idempotent=True)
-
-    def add_glossary(self, entry: GlossaryEntry) -> None:
-        ds = self._ds_id(DB_GLOSSARY)
-        props = {
-            "Термин": {"title": _text(entry.term)},
-            "Определение": {"rich_text": _text(entry.definition)},
-            "Источник": {"url": entry.source_url},
-            "Дата публикации": {"date": {"start": iso(entry.published_at)}},
-            "Ссылка на пост": {"url": entry.post_url},
-        }
-        self._write("добавить термин в словарь", lambda: self.client.pages.create(
-            parent={"type": "data_source_id", "data_source_id": ds}, properties=props), idempotent=False)
-
-    def glossary_entries(self) -> list[GlossaryEntry]:
-        out = []
-        for row in self._query(DB_GLOSSARY):
-            p = row["properties"]
-            term, url = _plain(p.get("Термин")).strip(), (p.get("Источник") or {}).get("url")
-            published = _date(p.get("Дата публикации"))
-            if term and url and published:
-                out.append(GlossaryEntry(term=term, definition=_plain(p.get("Определение")), source_url=url,
-                                         published_at=published,
-                                         post_url=(p.get("Ссылка на пост") or {}).get("url")))
-        return out
 
     def add_leaderboard_row(self, snap: Any) -> None:
         ds = self._ds_id(DB_LEADERBOARD)

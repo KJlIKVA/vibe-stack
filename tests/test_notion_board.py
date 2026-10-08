@@ -92,7 +92,7 @@ def board(cfg) -> tuple[NotionBoard, FakeNotion]:
 def test_setup_creates_all_databases_and_is_idempotent(board) -> None:
     b, fake = board
     created = b.setup()
-    assert created == ["Posts", "Rubrics", "Sources", "Glossary", "Leaderboard history", "Настройки"]
+    assert created == ["Posts", "Rubrics", "Sources", "Leaderboard history", "Настройки"]
     assert b.setup() == []
     posts_props = next(d for d in fake.dbs.values() if d["title"] == "Posts")["props"]
     assert {"Title", "Rubric", "Status", "Mode", "Urgent", "Score", "Scores", "Hard stops", "Reject reason",

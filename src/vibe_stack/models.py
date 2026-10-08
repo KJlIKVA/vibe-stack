@@ -205,16 +205,3 @@ class PostRecord(BaseModel):
     planned_at: datetime | None = None  # время публикации из плана дня (можно поменять в Notion)
 
 
-class GlossaryResult(BaseModel):
-    id: str
-    term: str
-    has_definition: bool
-    hard_stops: list[HardStop] = Field(default_factory=list)
-    claims: list[str] = Field(default_factory=list)
-    example: str = ""
-    not_to_confuse: str = ""
-
-    @field_validator("claims")
-    @classmethod
-    def _cut_claims(cls, v: list[str]) -> list[str]:
-        return [c.strip() for c in v if c.strip()][:4]

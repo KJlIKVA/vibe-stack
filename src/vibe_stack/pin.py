@@ -80,11 +80,6 @@ def render(rt: Runtime, snaps: dict[str, Snapshot], adapters: list[Any]) -> str:
         if others:  # у Artificial Analysis подпись обязательна по их условиям — она остаётся текстом
             lines += ["", f"<i>{DISCLAIMER_FULL}</i>"]
             lines += [f"<i>{a}</i>" for a in dict.fromkeys(s.attribution for s in others if s.attribution)]
-    terms = [r["term"] for r in rt.state.glossary_entries()[:5]]
-    page = rt.cfg.glossary.telegraph_url or rt.state.get("glossary:page_url")
-    if terms:
-        tail = f' · <a href="{html.escape(page, quote=True)}">все термины</a>' if page else ""
-        lines += ["", f"📖 <b>Словарь:</b> {html.escape(', '.join(terms))}{tail}"]
     return "\n".join(lines)
 
 

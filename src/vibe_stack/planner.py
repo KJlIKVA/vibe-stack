@@ -19,13 +19,7 @@ _STOP = {
 }
 
 
-# общий префикс рубрики — не тема: иначе «Слово дня: LLM» и «Слово дня: RAG» совпадают по Жаккару
-_RUBRIC_PREFIX = re.compile(r"^\s*слово дня:\s*")
-
-
 def topic_tokens(title: str, url: str = "") -> set[str]:
-    if m := _RUBRIC_PREFIX.match(title.lower()):
-        return {"term:" + title.lower()[m.end():].strip()}  # тема «Слова дня» — сам термин
     words = re.findall(r"[a-zа-яё0-9][a-zа-яё0-9+.#-]{2,}", title.lower())
     tokens = {w.strip(".-") for w in words if w not in _STOP}
     if repo := github_repo(url):

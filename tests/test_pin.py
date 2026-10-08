@@ -43,12 +43,13 @@ def test_failure_keeps_previous_date(cfg, tmp_path, now) -> None:
     run_pin(rt, [arena(["A", "B", "C"], date="2026-10-05")])
     s = run_pin(rt, [arena([], fail=True)])
     assert s["status"] == "unchanged" and s["problems"]
-    # словарь изменился — закреп правится, а рейтинг остаётся прошлым, «свежий» не выдумываем
-    rt.state.add_glossary(term="MCP", source_url="https://x", definition="d", published_at=now, post_url=None)
-    s = run_pin(rt, [arena([], fail=True)])
+    # другой рейтинг обновился — закреп правится, а упавший остаётся прошлым, «свежий» не выдумываем
+    video = FixtureLeaderboard({"key": "arena_video", "label": "Видео", "date": "2026-10-06", "top": ["V1", "V2", "V3"],
+                                "data_url": "https://example.org/arena"})
+    s = run_pin(rt, [arena([], fail=True), video])
     assert s["status"] == "edited"
     text = rt.tg.edited[-1][1]
-    assert "1. A\n2. B\n3. C" in text and "MCP" in text
+    assert "1. A\n2. B\n3. C" in text and "1. V1" in text
 
 
 def test_no_permitted_source_means_no_rating_block(cfg, tmp_path, now) -> None:

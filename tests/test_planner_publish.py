@@ -25,7 +25,7 @@ def published(title: str, rubric: str, url: str, at: datetime, urgent: bool = Fa
                         counts_regular=not urgent)
 
 
-ENABLED = {k: True for k in ("tool", "skill_mcp", "trick", "case", "urgent", "book_video", "glossary", "analysis")}
+ENABLED = {k: True for k in ("tool", "skill_mcp", "trick", "case", "urgent", "book_video", "analysis")}
 
 
 def pick(queue, history, cfg, now):
@@ -73,8 +73,8 @@ def test_weekly_max_and_min_quotas(cfg, now) -> None:
     q = [post("Book 3", "book_video", "https://pub3.dev/b", now=now)]
     assert pick(q, week, cfg, now).post is None  # больше 2 книг/видео в неделю нельзя
     q2 = [post("Big tool", "tool", "https://t.dev/x", score=15, now=now),
-          post("Слово дня: MCP", "glossary", "https://modelcontextprotocol.io/x", score=0, now=now)]
-    assert pick(q2, [], cfg, now).post.rubric == "glossary"  # недельный минимум важнее баллов
+          post("Почему агенты ошибаются", "analysis", "https://a.dev/why", score=0, now=now)]
+    assert pick(q2, [], cfg, now).post.rubric == "analysis"  # недельный минимум важнее баллов
 
 
 def test_score_then_waiting_time(cfg, now) -> None:
@@ -112,12 +112,3 @@ def test_soft_rubric_repeat_prefers_other_rubric(cfg, now) -> None:
     soft = pick_next(only_tools, hist, today=local_date(now, "Europe/Moscow"), now=now, cfg=cfg.planner,
                      rubric_enabled=ENABLED, soft_rubric_repeat=True)
     assert soft.post.title == "Tool B"  # в плане дня допускается, если других нет
-
-
-def test_glossary_terms_are_different_topics(cfg, now) -> None:
-    hist = [published("Слово дня: LLM", "glossary", "https://a.dev/llm", now - timedelta(days=3)),
-            published("Some tool", "tool", "https://t.dev/x", now - timedelta(hours=3))]
-    other = [post("Слово дня: RAG", "glossary", "https://b.dev/rag", now=now)]
-    same = [post("Слово дня: LLM", "glossary", "https://c.dev/llm", now=now)]
-    assert pick(other, hist, cfg, now).post is not None
-    assert pick(same, hist, cfg, now).post is None

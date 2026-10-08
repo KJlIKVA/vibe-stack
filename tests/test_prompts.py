@@ -10,8 +10,9 @@ from vibe_stack import prompts
 
 from .conftest import ROOT
 
+# None — блок спецификации, который не используем: надстройка «Слово дня» (рубрика отменена, решение 56)
 NAMES = ["safety", "score_A", "verify_B", "write_C_base", "write_C_standard", "write_C_urgent",
-         "write_C_book_video", "write_C_benchmark", "write_C_analysis", "write_C_glossary", "weekly_D"]
+         "write_C_book_video", "write_C_benchmark", "write_C_analysis", None, "weekly_D"]
 
 
 def _spec_blocks() -> list[str]:
@@ -20,7 +21,7 @@ def _spec_blocks() -> list[str]:
     return re.findall(r"```\n(.*?)```", sec, flags=re.S)
 
 
-@pytest.mark.parametrize(("name", "block"), list(zip(NAMES, _spec_blocks(), strict=True)))
+@pytest.mark.parametrize(("name", "block"), [(n, b) for n, b in zip(NAMES, _spec_blocks(), strict=True) if n])
 def test_prompt_files_match_spec_verbatim(name: str, block: str) -> None:
     assert prompts.load(name) == block
 
@@ -62,8 +63,7 @@ def test_weekly_prompt_contains_stats() -> None:
 def test_clarity_rules_in_every_writing_prompt() -> None:
     meta = {"category": "tool", "url": "u", "title": "t", "mode": "standard"}
     for overlay in prompts.OVERLAY_FILES:
-        extra = {"термин": "MCP"} if overlay == "glossary" else None
-        out = prompts.write_prompt(["c1", "c2"], meta, overlay, "🛠", "#инструмент", extra=extra)
+        out = prompts.write_prompt(["c1", "c2"], meta, overlay, "🛠", "#инструмент")
         assert "<понятность>" in out and "супер понятно" in out
         assert out.index("<понятность>") < out.index("Формат")  # правила понятности — до формата рубрики
     assert "<понятность>" in prompts.weekly_prompt({}, [], [])

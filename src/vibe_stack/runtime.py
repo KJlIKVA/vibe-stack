@@ -42,7 +42,6 @@ class Runtime:
     sources_factory: SourcesFactory
     fixture_candidates: list[Candidate] | None = None
     force: bool = False  # --force: пропустить защиту «уже запускался сегодня/на этой неделе»
-    glossary_page: Any = None  # публичная страница словаря (Telegraph) или None
     registry: Any = None  # проверка пакетов в PyPI/npm для песочницы (sandbox.Registry) или None
     _settings: BoardSettings | None = field(default=None, repr=False)
 
@@ -107,7 +106,7 @@ class Runtime:
         return self.sources_factory(chosen)
 
     def post_link(self, message_id: int | None) -> str | None:
-        """Ссылка на пост в канале (для словаря и итогов недели)."""
+        """Ссылка на пост в канале (для итогов недели и подборки «Что посмотреть»)."""
         if not message_id or message_id < 0:
             return None
         if self.cfg.channel.username:

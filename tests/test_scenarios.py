@@ -14,7 +14,7 @@ PHASE1 = load_fixtures(FIXTURES, NOW, max_phase=2)
 
 def test_all_phase1_fixtures_present() -> None:
     assert sorted(f.id for f in PHASE1) == ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12",
-                                            "13", "14", "15", "16", "17", "18"]
+                                            "13", "14", "15", "16", "18"]  # 17 — «Слово дня», отменено
 
 
 @pytest.mark.parametrize("fx", PHASE1, ids=[f"{f.id}-{f.scenario}" for f in PHASE1])

@@ -17,7 +17,7 @@ from typing import Any
 import yaml
 
 from .board import LocalBoard
-from .config import Config, GlossaryConfig, GlossaryTerm
+from .config import Config
 from .fetch import FixtureFetcher
 from .llm import LLM, FakeLLM
 from .models import Candidate, PostRecord, Status
@@ -38,7 +38,6 @@ class Fixture:
     llm: dict[tuple[str, str], Any]
     preseed: dict[str, Any] = field(default_factory=dict)
     board: dict[str, Any] = field(default_factory=dict)
-    glossary_terms: list[dict[str, Any]] = field(default_factory=list)
     leaderboards: list[dict[str, Any]] = field(default_factory=list)
     phase: int = 1
     path: Path | None = None
@@ -74,7 +73,7 @@ def load_fixture(path: Path, now: datetime) -> Fixture:
             docs[canonical_url(c.url)] = item["document"]
         for step, payload in (item.get("llm") or {}).items():
             ctx = c.id + ("#retry" if step.endswith("_retry") else "")
-            if step in ("score", "triage", "glossary") and isinstance(payload, dict):
+            if step in ("score", "triage") and isinstance(payload, dict):
                 payload = {"id": c.id, **payload}  # id кандидата вычисляется из URL
             llm[(step.removesuffix("_retry"), ctx)] = payload
     for step, payload in (raw.get("llm_global") or {}).items():
@@ -82,7 +81,7 @@ def load_fixture(path: Path, now: datetime) -> Fixture:
     return Fixture(
         id=str(raw["id"]), description=raw.get("description", ""), scenario=raw.get("scenario", "collect"),
         expected=raw.get("expected", {}), candidates=cands, documents=docs, llm=llm,
-        preseed=raw.get("preseed") or {}, board=raw.get("board") or {}, glossary_terms=raw.get("glossary_terms") or [],
+        preseed=raw.get("preseed") or {}, board=raw.get("board") or {},
         leaderboards=raw.get("leaderboards") or [],
         phase=int(raw.get("phase", 1)), path=path,
     )
@@ -121,9 +120,6 @@ def run_scenario(fx: Fixture, cfg: Config, now: datetime, llm_factory: LLMFactor
     from .runtime import Runtime
     from .urgent import run_urgent
 
-    # словарь фикстуры — только её собственные термины (по умолчанию пусто)
-    cfg = cfg.model_copy(update={"glossary": GlossaryConfig(
-        telegraph_page=False, terms=[GlossaryTerm(**t) for t in fx.glossary_terms])})
     tmp = Path(workdir or tempfile.mkdtemp(prefix=f"vs-{fx.id}-"))
     state = State(tmp / "state.db")
     board = LocalBoard(tmp / "board.json")
@@ -164,10 +160,6 @@ def run_scenario(fx: Fixture, cfg: Config, now: datetime, llm_factory: LLMFactor
             actual["summary"] = run_collect(rt)
         case "urgent":
             actual["summary"] = run_urgent(rt)
-        case "glossary":
-            from .glossary import run_glossary
-
-            actual["summary"] = run_glossary(rt)
         case "pin":
             from .pin import Snapshot, render, run_pin
 

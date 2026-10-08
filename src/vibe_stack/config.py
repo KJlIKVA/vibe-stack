@@ -20,8 +20,9 @@ SECRET_ENV_NAMES = (
     "NOTION_TOKEN",
     "NOTION_ROOT_PAGE_ID",
     "GITHUB_TOKEN",
-    "TELEGRAPH_TOKEN",
+    "TELEGRAPH_TOKEN",  # словарь отменён (решение 56), но токен ещё лежит в .env и секретах — маскируем
     "AA_API_KEY",
+    "YOUTUBE_API_KEY",
 )
 
 
@@ -141,19 +142,6 @@ class Prefilter(BaseModel):
     affiliate_params: list[str] = Field(default_factory=list)
 
 
-class GlossaryTerm(BaseModel):
-    term: str
-    aliases: list[str] = Field(default_factory=list)
-    source: str
-
-
-class GlossaryConfig(BaseModel):
-    telegraph_page: bool = True
-    telegraph_path: str = ""  # путь страницы на telegra.ph (публичный); токен — секрет TELEGRAPH_TOKEN
-    telegraph_url: str = ""
-    terms: list[GlossaryTerm] = Field(default_factory=list)
-
-
 class LeaderboardConfig(BaseModel):
     key: str
     type: Literal["arena_hf", "artificial_analysis"]
@@ -236,7 +224,6 @@ class Config(BaseModel):
     dedup: Dedup = Field(default_factory=Dedup)
     prefilter: Prefilter = Field(default_factory=Prefilter)
     rubrics: dict[str, Rubric]
-    glossary: GlossaryConfig = Field(default_factory=GlossaryConfig)
     leaderboards: list[LeaderboardConfig] = Field(default_factory=list)
     sources: list[SourceConfig] = Field(default_factory=list)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)

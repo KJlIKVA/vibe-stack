@@ -30,7 +30,7 @@ from .telegram import DryRunTelegram, Notifier, Telegram
 from .timeutil import local_date, parse_dt, utc_now
 
 log = logging.getLogger("vibe_stack")
-CONTOURS = ("collect", "publish", "urgent", "weekly", "pin", "glossary", "digest", "watchlist")
+CONTOURS = ("collect", "publish", "urgent", "weekly", "pin", "digest", "watchlist")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -57,7 +57,6 @@ def _parser() -> argparse.ArgumentParser:
     ev.add_argument("--phase", type=int, default=2)
     ev.add_argument("--only", help="id фикстуры")
     sub.add_parser("notion-setup", help="создать базы Notion под NOTION_ROOT_PAGE_ID")
-    sub.add_parser("telegraph-setup", help="один раз создать страницу словаря на Telegraph (токен — в .env)")
     sub.add_parser("status", help="счётчики за сегодня и расходы")
     se = sub.add_parser("sandbox-export", help="заявки песочницы в JSON (для job без секретов)")
     se.add_argument("--out-file", required=True)
@@ -81,8 +80,6 @@ def main(argv: list[str] | None = None) -> None:
             code = run_eval(args, cfg)
         elif args.command == "notion-setup":
             code = notion_setup(cfg)
-        elif args.command == "telegraph-setup":
-            code = telegraph_setup(cfg)
         elif args.command == "sandbox-export":
             code = sandbox_export(args, cfg)
         elif args.command == "sandbox-apply":
@@ -152,18 +149,6 @@ def build_runtime(args: argparse.Namespace, cfg: Config, contour: str) -> Runtim
         notifier = Notifier(None, None, out_dir / "admin.log")
 
     http = httpx.Client(timeout=cfg.fetch.timeout_s, headers={"User-Agent": cfg.fetch.user_agent})
-    glossary_page = None
-    if cfg.glossary.telegraph_page and cfg.glossary.telegraph_path:
-        from .glossary_page import DryRunPage, TelegraphPage
-
-        token = env("TELEGRAPH_TOKEN")
-        if not publish:
-            glossary_page = DryRunPage(out_dir / "glossary_page.json")
-        elif token:
-            author = f"https://t.me/{cfg.channel.username}" if cfg.channel.username else ""
-            glossary_page = TelegraphPage(token, cfg.glossary.telegraph_path, author)
-        else:
-            log.warning("TELEGRAPH_TOKEN не задан — страница словаря не обновляется")
     if publish or env("OPENAI_API_KEY"):
         llm: LLM = OpenAILLM(cfg.llm, state, run_id, clock, cfg.channel.tz, ledger=ledger)
     else:
@@ -172,7 +157,7 @@ def build_runtime(args: argparse.Namespace, cfg: Config, contour: str) -> Runtim
     rt = Runtime(
         cfg=cfg, state=state, board=board, tg=tg, notifier=notifier, llm=llm,
         fetcher=HttpFetcher(cfg.fetch, clock), clock=clock, run_id=run_id, out_dir=out_dir, mode=mode,
-        channel_id=channel, force=bool(args.force), glossary_page=glossary_page, registry=Registry(http),
+        channel_id=channel, force=bool(args.force), registry=Registry(http),
         sources_factory=lambda chosen: [build_source(s, http, clock, cfg.gate.max_age_days) for s in chosen],
     )
     state.start_run(run_id, contour, mode, clock())
@@ -182,7 +167,6 @@ def build_runtime(args: argparse.Namespace, cfg: Config, contour: str) -> Runtim
 def run_contour(args: argparse.Namespace, cfg: Config) -> int:
     from .collect import run_collect
     from .digest import run_digest
-    from .glossary import run_glossary
     from .leaderboards import build_adapters
     from .pin import run_pin
     from .publish import run_publish
@@ -193,7 +177,7 @@ def run_contour(args: argparse.Namespace, cfg: Config) -> int:
     rt = build_runtime(args, cfg, args.command)
     fn = {
         "collect": run_collect, "publish": run_publish, "urgent": run_urgent, "weekly": run_weekly,
-        "pin": lambda r: run_pin(r, build_adapters(cfg)), "glossary": run_glossary, "digest": run_digest,
+        "pin": lambda r: run_pin(r, build_adapters(cfg)), "digest": run_digest,
         "watchlist": run_watchlist,
     }[args.command]
     status_ = "ok"
@@ -326,24 +310,6 @@ def notion_setup(cfg: Config) -> int:
         print("В «Настройках» стоит флажок «Пауза» — снимите его, когда будете готовы к публикациям.")
     else:
         print("Пауза в «Настройках» снята — бот публикует по расписанию.")
-    return 0
-
-
-def telegraph_setup(cfg: Config) -> int:
-    from .glossary_page import setup
-
-    setup_logging(None)
-    if env("TELEGRAPH_TOKEN"):
-        print("TELEGRAPH_TOKEN уже задан — страница существует. Повторно не создаю.")
-        return 1
-    author_url = f"https://t.me/{cfg.channel.username}" if cfg.channel.username else ""
-    token, path, url = setup(author_url)
-    env_file = Path(".env")
-    lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.exists() else []
-    lines = [ln for ln in lines if not ln.startswith("TELEGRAPH_TOKEN=")] + [f"TELEGRAPH_TOKEN={token}"]
-    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print("токен записан в .env (TELEGRAPH_TOKEN) — его же нужно положить в GitHub Secrets")
-    print(f"path: {path}\nurl:  {url}\nВпишите их в config.yaml → glossary.telegraph_path / telegraph_url")
     return 0
 
 

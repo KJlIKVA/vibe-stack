@@ -10,7 +10,6 @@ from typing import Any
 from . import dayplan, images, prompts, sandbox
 from .board import BoardUnavailable
 from .config import Rubric
-from .glossary import run_glossary
 from .llm import BudgetExceeded, LLMError
 from .models import HARD_STOPS, Candidate, PostRecord, ScoreResult, Status
 from .runtime import Runtime
@@ -49,8 +48,6 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
     if not raw:
         summary["reason"] = "нет кандидатов: источники ничего не вернули"
         log.info(summary["reason"])
-        if half == "am":
-            _glossary_step(rt, summary)  # «Слово дня» от источников новостей не зависит
         return summary
 
     passed: list[Candidate] = []
@@ -113,8 +110,6 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
     if summary["queued"] + summary["pending_approval"] == 0 and not summary["stopped"]:
         summary["reason"] = "сегодня ничего не прошло отбор"
         log.info("публикаций из сбора ноль: %s", summary["reason"])
-    if not board_failed and not summary["stopped"] and half == "am":  # «Слово дня» — одно в день, утром
-        board_failed = _glossary_step(rt, summary)
     if not board_failed:
         # время каждому посту на сегодня + «План на сегодня» админу (после дневного сбора — обновлённый)
         summary["plan"] = dayplan.plan_and_report(rt, update=half == "pm")
@@ -213,14 +208,3 @@ def process_candidate(rt: Runtime, c: Candidate, rubrics: dict[str, Rubric]) -> 
     rt.decision(CONTOUR, c, "board", decision, [], rubric=g.rubric, score_total=g.total, detail=detail)
     return decision
 
-
-def _glossary_step(rt: Runtime, summary: dict[str, Any]) -> bool:
-    """Готовит «Слово дня». True — Notion недоступен (сбор тогда не отмечается выполненным)."""
-    try:
-        summary["glossary"] = run_glossary(rt)
-    except BudgetExceeded as e:
-        summary["glossary"] = {"status": f"stopped: {e}"}
-    except BoardUnavailable as e:
-        rt.notifier.notify(f"«Слово дня» не подготовлено: {e}")
-        return True
-    return False

@@ -47,7 +47,7 @@ jobs:
         run: scripts/state.sh pull
 
       - name: Контуры
-        timeout-minutes: 40  # сбор — до 30 минут (collect.max_minutes) + «Слово дня» и план дня
+        timeout-minutes: 40  # сбор — до 30 минут (collect.max_minutes) + план дня
         env:
           COMMANDS: ${{ inputs.commands }}
           MODE: ${{ inputs.mode }}
@@ -58,7 +58,6 @@ jobs:
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_ROOT_PAGE_ID: ${{ secrets.NOTION_ROOT_PAGE_ID }}
-          TELEGRAPH_TOKEN: ${{ secrets.TELEGRAPH_TOKEN }}
           AA_API_KEY: ${{ secrets.AA_API_KEY }}
           # видео YouTube (решение 48): без ключа источник YouTube молча пропускается
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
@@ -67,7 +66,7 @@ jobs:
         run: |
           status=0
           for c in $COMMANDS; do
-            case "$c" in collect|publish|urgent|weekly|pin|glossary|digest|watchlist) ;; *) echo "неизвестный контур $c"; exit 2;; esac
+            case "$c" in collect|publish|urgent|weekly|pin|digest|watchlist) ;; *) echo "неизвестный контур $c"; exit 2;; esac
             uv run --no-sync vibe-stack "$c" "--$MODE" $FORCE || status=1
           done
           exit $status

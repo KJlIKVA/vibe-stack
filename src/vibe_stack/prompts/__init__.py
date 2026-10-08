@@ -26,7 +26,6 @@ OVERLAY_FILES = {
     "book_video": "write_C_book_video",
     "benchmark": "write_C_benchmark",
     "analysis": "write_C_analysis",
-    "glossary": "write_C_glossary",
 }
 
 
@@ -95,13 +94,6 @@ def footer_template(rubric_key: str, overlay: str) -> str:
 
 def triage_prompt(candidate: dict[str, Any], source_document: str) -> str:
     return render(load("triage_U"), {
-        "candidate_json": json.dumps(candidate, ensure_ascii=False),
-        "первоисточник, обрезанный": source_document,
-    })
-
-
-def glossary_prompt(candidate: dict[str, Any], source_document: str) -> str:
-    return render(load("glossary_G"), {
         "candidate_json": json.dumps(candidate, ensure_ascii=False),
         "первоисточник, обрезанный": source_document,
     })

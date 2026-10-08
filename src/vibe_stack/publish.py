@@ -124,7 +124,7 @@ def _drop_stale_and_published(rt: Runtime, queue: list[PostRecord], now: datetim
             # отправлено, но доска не обновилась (например, Notion упал после отправки) — чиним статус
             _safe_update(rt, p.ref, status=Status.PUBLISHED)
             continue
-        if p.found_at and now - p.found_at > max_age and p.rubric != "glossary":  # определения не устаревают
+        if p.found_at and now - p.found_at > max_age:
             _safe_update(rt, p.ref, status=Status.REJECTED, reject_reason="stale: устарел в очереди")
             continue
         fresh.append(p)
@@ -198,10 +198,6 @@ def publish_post(rt: Runtime, post: PostRecord, *, slot: str | None, urgent: boo
 
         remember_headline(rt, mid, text)
     log.info("опубликовано: %s (message_id=%s)", post.title, mid)
-    if post.rubric == "glossary":
-        from .glossary import on_published
-
-        on_published(rt, post, mid, rt.post_link(mid))
     return True
 
 

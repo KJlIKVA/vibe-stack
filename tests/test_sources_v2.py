@@ -224,9 +224,7 @@ def make_rt(cfg, tmp_path, now, mode="publish") -> Runtime:
                    sources_factory=lambda _: [])
 
 
-def test_morning_and_afternoon_collects_glossary_only_in_the_morning(cfg, tmp_path, monkeypatch) -> None:
-    calls = []
-    monkeypatch.setattr(collect, "_glossary_step", lambda rt, s: calls.append(collect.collect_half(rt)) or False)
+def test_morning_and_afternoon_collects(cfg, tmp_path) -> None:
     morning = datetime(2026, 10, 8, 4, 0, tzinfo=UTC)  # 07:00 МСК
     rt = make_rt(cfg, tmp_path, morning)
     assert collect.run_collect(rt)["half"] == "am"
@@ -235,7 +233,7 @@ def test_morning_and_afternoon_collects_glossary_only_in_the_morning(cfg, tmp_pa
     rt.clock = lambda: morning + timedelta(hours=7)  # 14:00 МСК
     s = collect.run_collect(rt)
     assert s["half"] == "pm" and s.get("status") != "already_ran_today"
-    assert calls == ["am"]  # «Слово дня» — только утром
+    assert "glossary" not in s  # «Слово дня» отменено (решение 56)
 
 
 def test_daily_max_per_rubric(cfg, now) -> None:
