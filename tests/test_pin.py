@@ -154,6 +154,23 @@ def test_everything_auto_but_notion_can_still_ask_for_approval(cfg, tmp_path, no
 
 
 # --- решение 58: пост об изменении рейтинга ----------------------------------------------------------------
+def test_ratings_post_layout() -> None:
+    """Рейтинги через пустую строку, без хештега (решение 58)."""
+    from vibe_stack.pin import Snapshot
+    from vibe_stack.ratings_post import build
+
+    def snap(key, label, top):
+        return Snapshot(key=key, label=label, date="2026-10-08", top=top, data_url="https://example.org/arena")
+
+    text = build([(snap("c", "Кодинг", ["A", "B", "C"]), snap("c", "Кодинг", ["B", "A", "C"])),
+                  (snap("v", "Видео", ["V1", "V2", "V3"]), snap("v", "Видео", ["V1", "V3", "V2"]))],
+                 "https://example.org/arena")
+    assert text == ("🏆 <b>Рейтинг моделей изменился</b>\n\n"
+                    "<b>Кодинг:</b> B — новый лидер, A опустилась на 2-е место.\n\n"
+                    "<b>Видео:</b> V3 поднялась на 2-е место, V2 опустилась на 3-е место.\n\n"
+                    'Сверено с <a href="https://example.org/arena">первоисточником</a> ✅')
+
+
 def test_ratings_change_sentences() -> None:
     from vibe_stack.ratings_post import describe
 
@@ -179,5 +196,5 @@ def test_ratings_post_only_on_place_changes_and_once(cfg, tmp_path, now) -> None
     post = rt.tg.sent[-1][1]
     assert post.startswith("🏆 <b>Рейтинг моделей изменился</b>\n\n<b>Видео:</b> V4 вошла в топ-3 на 2-е место, "
                            "V2 опустилась на 3-е место, V3 выбыла из топ-3.")
-    assert post.endswith("#рейтинг") and "<b>Текст:</b>" not in post
+    assert post.endswith("первоисточником</a> ✅") and "#" not in post and "<b>Текст:</b>" not in post
     assert rt.state.published_since(rt.today())[-1].rubric == "ratings"

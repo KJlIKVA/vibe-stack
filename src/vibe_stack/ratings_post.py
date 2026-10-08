@@ -1,7 +1,8 @@
 """Пост «Рейтинг моделей изменился» (решение 58).
 
 Когда в топ-3 любого рейтинга навигатора появилась новая модель или модель сменила место, в канал выходит
-короткий текстовый пост без картинки: заголовок и по одному предложению на каждый изменившийся рейтинг.
+короткий текстовый пост без картинки и без хештега: заголовок и по одному предложению на каждый изменившийся
+рейтинг, рейтинги отделены пустой строкой.
 Текст собирает код из данных Arena, модель не участвует. Изменение одних очков без смены мест — не повод.
 Рейтинг без прошлого снимка (только что добавленный) пропускается: сравнивать не с чем.
 """
@@ -14,7 +15,7 @@ import json
 import logging
 from typing import Any
 
-from .footer import footer
+from .footer import CHECK
 from .pin import Snapshot
 from .runtime import Runtime
 from .telegram import TelegramError
@@ -23,7 +24,6 @@ from .urls import host_of
 log = logging.getLogger(__name__)
 RUBRIC = "ratings"
 TITLE = "🏆 <b>Рейтинг моделей изменился</b>"
-HASHTAG = "#рейтинг"
 
 
 def describe(old: list[str], new: list[str]) -> list[str]:
@@ -54,7 +54,8 @@ def build(pairs: list[tuple[Snapshot, Snapshot]], source_url: str) -> str | None
             lines.append(f"<b>{html.escape(new.label)}:</b> " + ", ".join(parts) + ".")
     if not lines:
         return None
-    return TITLE + "\n\n" + "\n".join(lines) + "\n\n" + footer(source_url, [HASHTAG])
+    link = f'<a href="{html.escape(source_url, quote=True)}">первоисточником</a>'
+    return TITLE + "\n\n" + "\n\n".join(lines) + f"\n\nСверено с {link} {CHECK}"
 
 
 def publish_changes(rt: Runtime, old: dict[str, Snapshot], new: dict[str, Snapshot],
