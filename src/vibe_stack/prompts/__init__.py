@@ -70,10 +70,20 @@ def render(template: str, values: dict[str, str], meta: dict[str, Any] | None = 
     return out
 
 
+_MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября",
+           "ноября", "декабря")
+
+
+def human_date(d: date) -> str:
+    """«9 октября 2026 года»: запись 09.10.2026 модель читала как 10 сентября и считала вышедшие в сентябре
+    книги «будущими» (решение 61)."""
+    return f"{d.day} {_MONTHS[d.month - 1]} {d.year} года"
+
+
 def score_prompt(candidate: dict[str, Any], source_document: str, today: date | None = None) -> str:
     # решения владельца — отдельным блоком после текста ТЗ (сам текст ТЗ не меняется); сегодняшняя дата — чтобы
     # модель не считала «будущей» книгу, вышедшую в сентябре (решение 53)
-    notes = load("score_notes").replace("{{сегодня}}", f"{today:%d.%m.%Y}" if today else "сегодняшнее число")
+    notes = load("score_notes").replace("{{сегодня}}", human_date(today) if today else "сегодняшнее число")
     return render(load("score_A"), {
         "candidate_json": json.dumps(candidate, ensure_ascii=False),
         "первоисточник, обрезанный": source_document,
@@ -81,9 +91,9 @@ def score_prompt(candidate: dict[str, Any], source_document: str, today: date | 
 
 
 # блоки решений владельца к шаблонам C по рубрикам; standard_notes — «Подводные камни» и без пустых отсылок
-# к первоисточнику (решение 57)
+# к первоисточнику (решение 57); benchmark_notes — понятный заголовок и «Зачем это вам» (решение 61)
 RUBRIC_NOTES = {"book_video": "book_video_notes", "tool": "standard_notes", "skill_mcp": "standard_notes",
-                "trick": "standard_notes", "case": "standard_notes"}
+                "trick": "standard_notes", "case": "standard_notes", "benchmark": "benchmark_notes"}
 
 
 def rubric_notes(rubric_key: str) -> str | None:

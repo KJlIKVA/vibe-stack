@@ -35,6 +35,7 @@ REASON_LABELS = {
     "blocked_domain": "домен в блок-листе",
     "rubric_disabled": "рубрика пока выключена",
     "no_title": "без заголовка",
+    "not_released": "ещё не вышло (книга в раннем доступе, pull request)",
 }
 
 

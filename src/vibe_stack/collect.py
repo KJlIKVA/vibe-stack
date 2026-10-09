@@ -206,7 +206,7 @@ def process_candidate(rt: Runtime, c: Candidate, rubrics: dict[str, Rubric]) -> 
         return "fetch_failed"
     c = with_page_title(c, doc)
     max_age = next((s.max_age_days for s in rt.cfg.sources if s.name == c.source), None)
-    if guards := doc_guards(doc, rt.cfg, rt.now(), max_age):
+    if guards := doc_guards(doc, rt.cfg, rt.now(), max_age, book=c.extra.get("media") == "book"):
         return _reject(rt, c, "code_guard", guards)
 
     score: ScoreResult = rt.llm.json("score", prompts.score_prompt(c.for_prompt(), doc.text, rt.today()),

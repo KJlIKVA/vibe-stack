@@ -9,7 +9,14 @@ from datetime import datetime, timedelta
 
 from . import footer, prompts
 from .config import Config, Rubric
-from .guards import affiliate_reason, domain_in, find_injection, only_unsafe_install
+from .guards import (
+    affiliate_reason,
+    domain_in,
+    find_injection,
+    github_work_in_progress,
+    only_unsafe_install,
+    unreleased_book,
+)
 from .lint import lint_post
 from .models import CATEGORY_TO_RUBRIC, Candidate, FetchedDoc, ScoreResult, VerifyResult
 from .runtime import Runtime
@@ -62,6 +69,8 @@ def prefilter(c: Candidate, cfg: Config, now: datetime) -> list[str]:
         reasons.append("outdated")
     if cfg.collect.code_injection_guard and find_injection(f"{c.title}\n{c.summary}"):
         reasons.append("injection_detected")
+    if github_work_in_progress(c.url):
+        reasons.append("not_released")  # pull request или issue: изменения у пользователей ещё нет (решение 61)
     return sorted(set(reasons))
 
 
@@ -75,9 +84,10 @@ def with_page_title(c: Candidate, doc: FetchedDoc) -> Candidate:
     return c.model_copy(update={"title": _SITE_SUFFIX.sub("", doc.title.strip())})
 
 
-def doc_guards(doc: FetchedDoc, cfg: Config, now: datetime | None = None, max_age_days: int | None = None) -> list[str]:
+def doc_guards(doc: FetchedDoc, cfg: Config, now: datetime | None = None, max_age_days: int | None = None,
+               book: bool = False) -> list[str]:
     """Проверки кодом по загруженному первоисточнику (now — проверять и даты документа; max_age_days —
-    свой предел источника, например у книг)."""
+    свой предел источника, например у книг; book — кандидат из источника книг)."""
     reasons = []
     if cfg.collect.code_injection_guard and find_injection(doc.text):
         reasons.append("injection_detected")
@@ -87,6 +97,8 @@ def doc_guards(doc: FetchedDoc, cfg: Config, now: datetime | None = None, max_ag
         dates = [d for d in (parse_dt(doc.published_meta), parse_dt(doc.updated_meta)) if d]
         if dates and now - max(dates) > timedelta(days=max_age_days or cfg.gate.max_age_days):
             reasons.append("outdated")  # по датам самого источника: старый проект, всплывший на HN
+    if book and unreleased_book(doc.text):
+        reasons.append("not_released")  # ранний доступ или «скоро выйдет» — только вышедшие книги (решение 61)
     return reasons
 
 
@@ -174,7 +186,7 @@ def write(rt: Runtime, c: Candidate, rubric_key: str, rubric: Rubric, approved: 
     rubric_notes = prompts.rubric_notes(rubric_key)
     if rubric_notes and "{{сегодня}}" in rubric_notes:
         # у книг и видео даты выхода: без сегодняшней даты модель пишет «выйдет в сентябре» в октябре
-        rubric_notes = rubric_notes.replace("{{сегодня}}", f"{rt.today():%d.%m.%Y}")
+        rubric_notes = rubric_notes.replace("{{сегодня}}", prompts.human_date(rt.today()))
     notes = "\n\n".join(n for n in (rubric_notes, notes) if n) or None
     prompt = prompts.write_prompt(approved, meta, rubric.overlay, rubric.emoji, rubric.hashtag, extra, notes)
     template = prompts.load(prompts.OVERLAY_FILES[rubric.overlay])

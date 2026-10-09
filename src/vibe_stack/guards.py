@@ -77,3 +77,23 @@ def domain_in(url: str, domains: list[str]) -> bool:
         if same_site(host, dom) and (not prefix or path.lstrip("/").startswith(prefix)):
             return True
     return False
+
+
+# Решение 61: пишем только о вышедших книгах. Метки раннего доступа и «скоро выйдет» на страницах издательств:
+# Manning — «MEAP began …», «Publication in Spring 2027 (estimated)»; O'Reilly — «Early Release»;
+# Pragmatic Bookshelf — «This book is in beta»; Springer/Apress — «Due: 12 November 2026».
+UNRELEASED_BOOK_RE = re.compile(
+    r"\bMEAP began\b|\bEarly Release\b|\bPublication in\b[^\n]{0,40}\(\s*estimated\s*\)"
+    r"|\bthis (?:book|title) is (?:currently )?in beta\b|\bDue:\s*\d{1,2}\s+[A-Z][a-z]+\s+\d{4}",
+    re.IGNORECASE,
+)
+# Pull request, issue или коммит — предложенное изменение, а не вышедшее: читателю пока нечем пользоваться
+_GH_UNRELEASED_PATH = re.compile(r"^/[^/]+/[^/]+/(?:pull|pulls|issues|commit|compare)(?:/|$)")
+
+
+def unreleased_book(text: str) -> bool:
+    return UNRELEASED_BOOK_RE.search(text) is not None
+
+
+def github_work_in_progress(url: str) -> bool:
+    return host_of(url) == "github.com" and _GH_UNRELEASED_PATH.match(urlsplit(url).path) is not None
