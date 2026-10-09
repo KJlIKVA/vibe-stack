@@ -432,6 +432,20 @@ def test_book_backlog_allows_more_per_week(cfg, now, books_this_week, queued, al
     assert (_plan(cfg, now, q, hist, groups).post is not None) is allowed
 
 
+def test_books_spread_one_per_day(cfg, now) -> None:
+    """Решение 60: недельные книги не выходят пачкой в один день — не больше одной в день; видео это не мешает."""
+    hist = [published("Alpha volume", "book_video", "https://h.dev/", now - timedelta(hours=1))]
+    q = [post(f"Zeta{i} handbook{i}", "book_video", f"https://q{i}.dev/", score=15, now=now) for i in range(6)]
+    groups = {h.ref: "book" for h in hist} | {p.ref: "book" for p in q}
+    res = _plan(cfg, now, q, hist, groups)
+    assert res.post is None and "дневной максимум рубрики" in str(res.skipped)
+    talk = post("Talk unique", "book_video", "https://t.dev/", score=12, now=now)
+    assert _plan(cfg, now, [*q, talk], hist, groups | {talk.ref: "watch"}).post is talk
+    tomorrow = now + timedelta(days=1)
+    assert pick_next(q, hist, today=local_date(tomorrow, "Europe/Moscow"), now=tomorrow, cfg=cfg.planner,
+                     rubric_enabled=ENABLED, soft_rubric_repeat=True, groups=groups).post is not None
+
+
 def test_book_waits_in_queue_longer_than_news(cfg, tmp_path, now) -> None:
     from vibe_stack.models import PostRecord, Status
     from vibe_stack.publish import _drop_stale_and_published

@@ -67,7 +67,8 @@ planner:
   # «Книга/видео» (решения 50, 52): ключ «рубрика:группа» — book_video:watch (видео и подкасты),
   # book_video:book (книги). Группа — по хештегу поста. При очереди группы от backlog_queue (считая вышедшие
   # за день или неделю) действует backlog_*.
-  daily_max: {book_video: 3, "book_video:watch": 1}  # видео/подкаст — раз в день, если прошло отбор
+  # видео/подкаст — раз в день, если прошло отбор; книга — не больше одной в день (решение 60)
+  daily_max: {book_video: 3, "book_video:watch": 1, "book_video:book": 1}
   backlog_daily_max: {"book_video:watch": 2}         # …при очереди от 5 — до двух в день
   weekly_max: {"book_video:book": 1}                 # книга — раз в неделю
   backlog_weekly_max: {"book_video:book": 3}         # …при очереди книг от 5 — до трёх в неделю
