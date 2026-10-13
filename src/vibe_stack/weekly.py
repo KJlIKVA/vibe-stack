@@ -20,7 +20,8 @@ log = logging.getLogger(__name__)
 REASON_LABELS = {
     "ad": "реклама или партнёрская ссылка",
     "no_primary_source": "нет первоисточника",
-    "unsafe_install": "небезопасная установка (curl | bash)",
+    # без «curl | bash» в подписи: модель переносит её в текст, и линтер итогов ловит команду (решение 62)
+    "unsafe_install": "небезопасная установка: скрипт из интернета сразу в shell",
     "outdated": "устарело",
     "off_topic": "не по теме канала",
     "duplicate_suspected": "похоже на повтор",
@@ -55,7 +56,8 @@ def compute_stats(rt: Runtime) -> tuple[dict[str, Any], list[dict[str, Any]], li
     rows = [r for r in rt.state.candidates_between(start, end)
             if r["stage"] not in ("dedup", "deferred") and r["contour"] != "glossary"]
     seen_ids = {r["id"] for r in rows}
-    rejected = [r for r in rows if r["decision"] in ("rejected", "not_urgent")]
+    # «не срочно» — не отказ: материал идёт в обычный сбор и может выйти (решение 62)
+    rejected = [r for r in rows if r["decision"] == "rejected"]
     by_reason: Counter[str] = Counter()
     for r in rejected:
         for code in json.loads(r["reasons"]) or ["other"]:

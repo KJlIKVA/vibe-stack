@@ -4,13 +4,15 @@
 или None. Места берутся только из данных источника — код ничего не ранжирует сам и не «додумывает».
 
 - Arena: сайт arena.ai по их ToS скрапить нельзя. Разрешённый путь — их датасет на Hugging Face
-  lmarena-ai/leaderboard-dataset (CC BY 4.0), читаем через официальный datasets-server API.
+  lmarena-ai/leaderboard-dataset (CC BY 4.0), читаем через официальный datasets-server API. Рейтинга, которого
+  в датасете ещё нет (Alignment Index, решение 62), ждём молча: срез задан шаблоном и проверяется с каждым сбором.
 - Artificial Analysis: бесплатный API с ключом, но условия ограничивают ежедневный топ без письменного
   согласия — адаптер выключен в config.yaml, пока владелец канала не получит разрешение.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import os
 import time
@@ -20,13 +22,14 @@ from typing import Any
 import httpx
 
 from .config import Config, LeaderboardConfig
-from .pin import Snapshot
+from .pin import NotYetPublished, Snapshot
 from .timeutil import Clock, local_date
 
 log = logging.getLogger(__name__)
 
 HF_DATASET = "lmarena-ai/leaderboard-dataset"
 HF_ROWS = "https://datasets-server.huggingface.co/rows"
+HF_SPLITS = "https://datasets-server.huggingface.co/splits"
 HF_PAGE = f"https://huggingface.co/datasets/{HF_DATASET}"
 CC_BY = "https://creativecommons.org/licenses/by/4.0/"
 ARENA_ATTRIBUTION = (f'Arena: <a href="{HF_PAGE}">leaderboard-dataset</a> '
@@ -40,6 +43,8 @@ class ArenaAdapter:
 
     Строки среза идут блоками по категориям (overall — первой), внутри блока — по месту. Листаем страницы, пока
     не найдём места 1–3 своей категории или не пройдём её блок: для coding это около десяти страниц.
+
+    dataset_config со «*» — шаблон имени среза, которого в датасете может ещё не быть (решение 62).
     """
 
     def __init__(self, cfg: LeaderboardConfig, client: httpx.Client, max_pages: int = 40) -> None:
@@ -50,23 +55,38 @@ class ArenaAdapter:
         self.client = client
         self.max_pages = max_pages
 
-    def _page(self, page: int) -> list[dict[str, Any]]:
-        params = {"dataset": HF_DATASET, "config": self.config, "split": "latest", "offset": page * 100,
-                  "length": 100}
-        r = self.client.get(HF_ROWS, params=params)
+    def _get(self, url: str, params: dict[str, Any]) -> Any:
+        r = self.client.get(url, params=params)
         # datasets-server ограничивает частые запросы (429) и временами отвечает 502/503 — две паузы и повтор
         for pause in (3, 10):
             if r.status_code != 429 and r.status_code < 500:
                 break
             time.sleep(pause)
-            r = self.client.get(HF_ROWS, params=params)
+            r = self.client.get(url, params=params)
         r.raise_for_status()
-        return [x["row"] for x in r.json().get("rows", [])]
+        return r.json()
+
+    def _page(self, config: str, page: int) -> list[dict[str, Any]]:
+        params = {"dataset": HF_DATASET, "config": config, "split": "latest", "offset": page * 100, "length": 100}
+        return [x["row"] for x in self._get(HF_ROWS, params).get("rows", [])]
+
+    def _resolve_config(self) -> str:
+        """Срез по шаблону: самое короткое подходящее имя. У Agent Arena рядом с общим срезом `agent` лежат срезы
+        отдельных сигналов `agent_*` — общий короче. Подходящего нет — рейтинг ещё не опубликован."""
+        if "*" not in self.config:
+            return self.config
+        splits = self._get(HF_SPLITS, {"dataset": HF_DATASET}).get("splits", [])
+        names = {str(x.get("config", "")).lower() for x in splits if x.get("split") == "latest"}
+        found = sorted((n for n in names if fnmatch.fnmatchcase(n, self.config)), key=lambda n: (len(n), n))
+        if not found:
+            raise NotYetPublished(f"в датасете Arena пока нет среза {self.config}")
+        return found[0]
 
     def fetch(self) -> Snapshot | None:
+        config = self._resolve_config()
         mine: list[dict[str, Any]] = []
         for page in range(self.max_pages):
-            batch = self._page(page)
+            batch = self._page(config, page)
             here = [x for x in batch if x.get("category") == self.category]
             if mine and not here:
                 break  # блок категории закончился
@@ -75,11 +95,11 @@ class ArenaAdapter:
                 break
         top = sorted(mine, key=_rank)[:3]
         if [_rank(x) for x in top] != [1, 2, 3]:
-            log.warning("Arena %s: в данных не нашлись места 1–3 категории %s", self.config, self.category)
+            log.warning("Arena %s: в данных не нашлись места 1–3 категории %s", config, self.category)
             return None
         dates = {_iso_date(x.get("leaderboard_publish_date")) for x in top}
         if len(dates) != 1 or None in dates:
-            log.warning("Arena %s: у топ-3 нет общей даты публикации %s", self.config, dates)
+            log.warning("Arena %s: у топ-3 нет общей даты публикации %s", config, dates)
             return None  # дату не выдумываем: без неё строка остаётся с прошлыми данными
         return Snapshot(key=self.key, label=self.label, date=dates.pop(), top=[str(x["model_name"]) for x in top],
                         scores=[_score(x) for x in top], data_url=HF_PAGE, attribution=ARENA_ATTRIBUTION)
@@ -87,11 +107,12 @@ class ArenaAdapter:
 
 def _score(row: dict[str, Any]) -> str:
     """Рейтинг места для навигатора: Arena Score (rating, ~1500) — целым числом, IPS-оценка Agent Arena (score,
-    доли единицы) — тремя знаками. Нет числа — пусто, место показывается без рейтинга."""
-    for key, fmt in (("rating", "{:.0f}"), ("score", "{:.3f}")):
-        v = row.get(key)
-        if isinstance(v, int | float):
-            return fmt.format(v)
+    доли единицы) — тремя знаками, оценка по шкале до 100 (Alignment Index на сайте — 87.9) — одним знаком.
+    Нет числа — пусто, место показывается без рейтинга."""
+    if isinstance(v := row.get("rating"), int | float):
+        return f"{v:.0f}"
+    if isinstance(v := row.get("score"), int | float):
+        return f"{v:.1f}" if abs(v) >= 10 else f"{v:.3f}"
     return ""
 
 

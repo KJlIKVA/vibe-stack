@@ -19,13 +19,46 @@ _STOP = {
 }
 
 
+# имя проекта, которое не говорит, какой это проект: «MCP: …» и репозиторий x/mcp — не одна новость
+_GENERIC_NAMES = {"mcp", "api", "cli", "sdk", "app", "docs", "agent", "agents", "skill", "skills", "tool", "tools",
+                  "awesome", "github", "openai", "google", "anthropic", "microsoft", "claude", "gemini", "codex"}
+_TITLE_PREFIX = re.compile(r"^(?:github\s+-\s+|(?:show|ask|launch)\s+hn:\s*)", re.I)
+_LEAD_END = re.compile(r"\s*[:–—|]\s*|\s+-\s+")
+
+
+def _name(s: str) -> str:
+    return re.sub(r"[^a-zа-яё0-9]", "", s.lower())
+
+
 def topic_tokens(title: str, url: str = "") -> set[str]:
     # короткие числа тоже слова темы: «Mistral Large 4» и «Mistral Large 3» — разные модели
     words = re.findall(r"[a-zа-яё0-9][a-zа-яё0-9+.#-]{2,}|\d+(?:\.\d+)*", title.lower())
     tokens = {w.strip(".-") for w in words if w not in _STOP}
+    # проект (решение 62): у репозитория — его имя, у остальных — начало заголовка до «:», «—», « - ».
+    # Репозиторий google-ai-edge/ml-drift и пост «ML Drift: Next-Gen GPU…» — одна новость
     if repo := github_repo(url):
         tokens.add(f"repo:{repo}")
+        name = _name(repo.split("/")[1])
+        prefix = "proj"
+    else:
+        name = _name(_LEAD_END.split(_TITLE_PREFIX.sub("", title.strip()), maxsplit=1)[0].rsplit("/", 1)[-1])
+        prefix = "lead"
+    if len(name) >= 3 and name not in _GENERIC_NAMES:
+        tokens.add(f"{prefix}:{name}")
     return {t for t in tokens if t}
+
+
+def _without(tokens: set[str], *prefixes: str) -> set[str]:
+    return {t for t in tokens if not t.startswith(prefixes)}
+
+
+def same_project(a: set[str], b: set[str]) -> bool:
+    """Пост о репозитории и пост, чей заголовок начинается с имени этого проекта (ML Drift, MXC). Два репозитория
+    сравнивает правило repo:, два обычных заголовка с общим началом («OpenAI API: …») — не одна новость."""
+    def names(t: set[str], prefix: str) -> set[str]:
+        return {x.split(":", 1)[1] for x in t if x.startswith(prefix)}
+
+    return bool(names(a, "proj:") & names(b, "lead:") or names(b, "proj:") & names(a, "lead:"))
 
 
 def domain_key(url: str, domain: str = "") -> str:
@@ -55,9 +88,10 @@ def same_topic(a: set[str], b: set[str], threshold: float) -> bool:
     if not a or not b:
         return False
     repos_a = {t for t in a if t.startswith("repo:")}
-    if repos_a and repos_a & b:
+    if (repos_a and repos_a & b) or same_project(a, b):
         return True
-    return len(a & b) / len(a | b) >= threshold
+    a, b = _without(a, "proj:", "lead:"), _without(b, "proj:", "lead:")
+    return bool(a | b) and len(a & b) / len(a | b) >= threshold
 
 
 def same_news(a: set[str], b: set[str]) -> bool:
@@ -65,10 +99,12 @@ def same_news(a: set[str], b: set[str]) -> bool:
 
     Общий репозиторий не в счёт (claude-code v2.1.293 и v2.1.294 — разные выпуски), разные числа — разные
     новости (раунды инвестиций, версии). Одна новость — почти одинаковые заголовки или короткий заголовок,
-    целиком входящий в длинный, если совпадает номер версии или хотя бы три слова.
+    целиком входящий в длинный, если совпадает номер версии или хотя бы три слова. Репозиторий и пост о том же
+    проекте (same_project) — одна новость.
     """
-    a = {t for t in a if not t.startswith("repo:")}
-    b = {t for t in b if not t.startswith("repo:")}
+    if same_project(a, b):
+        return True
+    a, b = _without(a, "repo:", "proj:", "lead:"), _without(b, "repo:", "proj:", "lead:")
     common = a & b
     if len(common) < 2:
         return False

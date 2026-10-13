@@ -52,6 +52,30 @@ def test_stats_are_computed_by_code(cfg, tmp_path, now) -> None:
     assert {e["причина"] for e in examples} == {"реклама или партнёрская ссылка", "мало практической пользы"}
 
 
+def test_not_urgent_is_not_a_rejection(cfg, tmp_path, now) -> None:
+    """Решение 62: «не срочно» — не отказ: такой материал идёт в обычный сбор. В итогах 11.10 он давал причины
+    «event» и «published» и считался отклонённым, даже если потом вышел."""
+    rt = make_rt(cfg, tmp_path, now, {})
+    seed(rt, now)
+    c = Candidate(source="s", source_type="rss", url="https://x2.dev", title="Item 2")
+    rt.decision("urgent", c, "triage", "not_urgent", ["event:none"])
+    stats, _, _ = compute_stats(rt)
+    assert stats["отклонено"] == 2 and "event" not in stats["отклонено_по_причинам"]
+
+
+def test_reason_labels_pass_weekly_lint() -> None:
+    """11.10 итоги не вышли: подпись «небезопасная установка (curl | bash)» модель перенесла в текст, и линтер
+    поймал команду (unsafe_command). Подписи причин не должны ломать проверку итогов."""
+    from vibe_stack import prompts
+    from vibe_stack.lint import lint_post
+    from vibe_stack.weekly import REASON_LABELS
+
+    for label in REASON_LABELS.values():
+        text = f"📋 <b>Итоги недели</b>\n\nПример отказа: «yetone/magpie» — {label}."
+        assert lint_post(text, rubric="weekly", max_chars=4000, source_url="", weekly=True, allowed_text="",
+                         template_text=prompts.load("weekly_D")) == [], label
+
+
 def test_weekly_publishes_and_passes_exact_stats(cfg, tmp_path, now) -> None:
     rt = make_rt(cfg, tmp_path, now, {("weekly", "weekly"): WEEKLY})
     seed(rt, now)

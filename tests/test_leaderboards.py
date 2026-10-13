@@ -81,6 +81,47 @@ def test_arena_scores_shown_as_in_source() -> None:
     assert a.fetch().scores == ["0.143", "0.138", "0.125"]
 
 
+def test_arena_score_out_of_100_with_one_decimal() -> None:
+    """Alignment Index на сайте — 87.9 из 100 (решение 62): одним знаком, а не «87.900»."""
+    a, _ = arena_with([[row(1, "GPT-6.1 Sol", score=87.93), row(2, "GPT-6 Astra", score=87.8),
+                        row(3, "GPT-6 Luna", score=87.75)]])
+    assert a.fetch().scores == ["87.9", "87.8", "87.8"]
+
+
+def alignment_with(configs, rows=()):
+    calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(req.url.path)
+        if req.url.path.endswith("/splits"):
+            return httpx.Response(200, json={"splits": [{"config": c, "split": sp} for c in configs
+                                                        for sp in ("latest", "full")]})
+        calls[-1] += ":" + req.url.params["config"]
+        return httpx.Response(200, json={"rows": list(rows) if not int(req.url.params["offset"]) else []})
+
+    cfg = LeaderboardConfig(key="arena_alignment", type="arena_hf", label="Агенты: надёжность",
+                            dataset_config="*align*")
+    return ArenaAdapter(cfg, httpx.Client(transport=httpx.MockTransport(handler))), calls
+
+
+def test_alignment_waits_for_dataset_then_takes_aggregate() -> None:
+    """Решение 62: среза с Alignment Index в датасете нет — «ещё не опубликован», а не сбой. Появился вместе со
+    срезами сигналов — берётся общий (самое короткое имя)."""
+    import pytest
+
+    from vibe_stack.pin import NotYetPublished
+
+    a, calls = alignment_with(["agent", "agent_steerability", "text_style_control"])
+    with pytest.raises(NotYetPublished):
+        a.fetch()
+    assert calls == ["/splits"]  # строки не запрашивали
+    a, calls = alignment_with(["agent", "agent_alignment_deceptive_completion", "agent_alignment"],
+                              [row(1, "GPT-6.1 Sol", score=87.9), row(2, "GPT-6 Astra", score=87.8),
+                               row(3, "GPT-6 Luna", score=87.8)])
+    s = a.fetch()
+    assert s.top == ["GPT-6.1 Sol", "GPT-6 Astra", "GPT-6 Luna"] and calls[1] == "/rows:agent_alignment"
+
+
 def test_arena_missing_ranks_or_mixed_dates_gives_none() -> None:
     a, _ = arena_with([[row(1, "a"), row(2, "b"), row(4, "d")], []])
     assert a.fetch() is None  # третьего места нет — ничего не выдумываем
@@ -110,7 +151,7 @@ def test_aa_disabled_by_default(cfg) -> None:
     from vibe_stack.leaderboards import build_adapters
 
     assert [a.key for a in build_adapters(cfg)] == ["arena_text", "arena_coding", "arena_webdev", "arena_agent",
-                                                    "arena_image", "arena_video"]
+                                                    "arena_alignment", "arena_image", "arena_video"]
 
 
 def test_arena_without_valid_date_gives_none() -> None:

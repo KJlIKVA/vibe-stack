@@ -61,6 +61,11 @@ def pretty_model(name: str) -> str:
     return " ".join(words) + date + effort + tail
 
 
+class NotYetPublished(Exception):
+    """Рейтинга ещё нет в источнике (Alignment Index ждёт датасета Arena, решение 62). Не сбой: строки в закрепе
+    нет, оповещения нет, источник проверяется с каждым сбором."""
+
+
 class Snapshot(BaseModel):
     """Топ-3 одного рейтинга на дату источника."""
 
@@ -88,6 +93,9 @@ def refresh_snapshots(rt: Runtime, adapters: list[Any]) -> tuple[dict[str, Snaps
             problem = None if s is None else ("в данных меньше трёх моделей" if len(s.top) < 3 else None)
             if s is None:
                 problem = "нет данных"
+        except NotYetPublished as e:
+            log.info("рейтинг %s: %s — ждём", a.key, e)
+            continue
         except Exception as e:  # источник рейтинга недоступен — не повод ломать закреп
             s, problem = None, f"{type(e).__name__}: {str(e)[:120]}"
         if problem:
@@ -141,6 +149,9 @@ def run_pin(rt: Runtime, adapters: list[Any]) -> dict[str, Any]:
     summary["ratings_post"] = publish_changes(rt, before, snaps, adapters)
     if problems:
         rt.notifier.notify("закреп: рейтинг не обновлён — " + "; ".join(problems)[:500])
+    # рейтинг, которого ждали (решение 62), появился в данных — админу один раз: снимок сохранится ниже
+    if before and (new := [snaps[a.key].label for a in adapters if a.key in snaps and a.key not in before]):
+        rt.notifier.notify("закреп: появился рейтинг " + ", ".join(f"«{x}»" for x in new))
     text = render(rt, snaps, adapters)
     digest = hashlib.sha256(text.encode()).hexdigest()
     mid = rt.state.get("pin:message_id")

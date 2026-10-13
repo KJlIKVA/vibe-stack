@@ -219,10 +219,12 @@ class FixtureLeaderboard:
         self.spec = spec
 
     def fetch(self) -> Any:
-        from .pin import Snapshot
+        from .pin import NotYetPublished, Snapshot
 
         if self.spec.get("fail"):
             raise ConnectionError("источник рейтинга недоступен")
+        if self.spec.get("pending"):
+            raise NotYetPublished("рейтинга ещё нет в источнике")
         return Snapshot(key=self.key, label=self.spec["label"], date=self.spec["date"], top=self.spec["top"],
                         scores=self.spec.get("scores", []), data_url=self.spec["data_url"])
 

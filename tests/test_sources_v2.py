@@ -262,6 +262,18 @@ def test_backlog_allows_second_post_a_day(cfg, now, queued, allowed) -> None:
     assert res.post is None  # третий — нет: при любой очереди не больше двух
 
 
+def test_video_backlog_allows_four_a_day(cfg, now) -> None:
+    """Решение 62: при очереди видео от 5 — до четырёх в день (было два: очередь росла, видео устаревали)."""
+    hist = [published(f"Talk{i} unique{i}", "book_video", f"https://h{i}.dev/", now - timedelta(hours=1 + i))
+            for i in range(3)]
+    q = [post(f"Video{i} special{i}", "book_video", f"https://v{i}.dev/", score=15, now=now) for i in range(6)]
+    groups = {h.ref: "watch" for h in hist} | {p.ref: "watch" for p in q}
+    assert _plan(cfg, now, q, hist, groups).post is not None  # четвёртое
+    hist.append(published("Talk3 unique3", "book_video", "https://h3.dev/", now - timedelta(minutes=30)))
+    res = _plan(cfg, now, q, hist, groups | {hist[-1].ref: "watch"})
+    assert res.post is None and "дневной максимум рубрики" in str(res.skipped)  # пятого нет
+
+
 def test_afternoon_plan_message_only_when_something_was_added(cfg, tmp_path, now) -> None:
     from vibe_stack import dayplan
 
@@ -557,6 +569,32 @@ def test_different_news_are_not_merged_before_scoring() -> None:
     assert same(("Mistral Large 4", ""), ("Introducing Mistral Large 4", ""))
     assert not same(("Mistral Large 3", ""), ("Mistral Large 4", ""))
     assert same(("Claude Haiku 5.5 in GitHub Copilot", ""), ("Claude Haiku 5.5", ""))
+
+
+def test_repo_and_post_about_same_project_are_one_news(cfg, now) -> None:
+    """Повторы из канала 10–12.10 (решение 62): блог о проекте и его репозиторий — одна новость и до оценки,
+    и в планировщике. Общее начало двух обычных заголовков и общие слова вроде Codex — нет."""
+    from vibe_stack.planner import same_news, topic_tokens
+
+    blog = ("ML Drift: Next-Gen GPU AI/ML Inference at the Edge", "https://developers.googleblog.com/ml-drift")
+    repo = ("GitHub - google-ai-edge/ml-drift: GPU-Accelerated AI/ML Inference", "https://github.com/google-ai-edge/ml-drift")
+    mxc_repo = ("MXC - a sandboxed code execution system", "https://github.com/microsoft/mxc")
+    mxc_blog = ("Mxc: Microsoft Execution Containers version 1.0.0", "https://blogs.windows.com/2026/10/07/mxc")
+    for a, b in [(blog, repo), (mxc_repo, mxc_blog)]:
+        assert same_news(topic_tokens(*a), topic_tokens(*b)) and same_news(topic_tokens(*b), topic_tokens(*a))
+        hist = [published(a[0], "tool", a[1], now - timedelta(days=2))]
+        res = pick_next([post(b[0], "tool", b[1], score=15, now=now)], hist, today=local_date(now, "Europe/Moscow"),
+                        now=now, cfg=cfg.planner, rubric_enabled=ENABLED, soft_rubric_repeat=True)
+        assert res.post is None and "тема была" in str(res.skipped)
+
+    def same(x: tuple[str, str], y: tuple[str, str]) -> bool:
+        return same_news(topic_tokens(*x), topic_tokens(*y))
+
+    assert not same(("OpenAI API: Added Ultrafast mode", "https://developers.openai.com/a"),
+                    ("OpenAI API: New rate limits", "https://developers.openai.com/b"))
+    assert not same(("openai/codex 0.162.1", "https://github.com/openai/codex"),
+                    ("Codex: cloud tasks for teams", "https://openai.com/index/codex-teams"))
+    assert not same(("acme/mcp", "https://github.com/acme/mcp"), ("MCP: a new spec release", "https://x.dev/mcp"))
 
 
 def test_video_about_the_news_is_not_a_duplicate(cfg, tmp_path, now) -> None:

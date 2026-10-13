@@ -54,6 +54,26 @@ def test_failure_keeps_previous_date(cfg, tmp_path, now) -> None:
     assert "🥇 A\n🥈 B\n🥉 C" in text and "🥇 V1" in text
 
 
+def test_awaited_rating_appears_by_itself(cfg, tmp_path, now) -> None:
+    """Решение 62: рейтинга ещё нет в источнике — ни строки, ни оповещения; появился — блок в закрепе и одно
+    оповещение админу. Поста «рейтинг изменился» нет: сравнивать не с чем."""
+    rt = make_rt(cfg, tmp_path, now)
+    spec = {"key": "arena_alignment", "label": "Агенты: надёжность", "date": "2026-10-20",
+            "top": ["GPT-6.1 Sol", "GPT-6 Astra", "GPT-6 Luna"], "data_url": "https://example.org/arena",
+            "pending": True}
+    log = tmp_path / "a.log"
+    s = run_pin(rt, [arena(["A", "B", "C"]), FixtureLeaderboard(spec)])
+    assert s["problems"] == [] and "надёжность" not in rt.tg.sent[0][1]
+    assert run_pin(rt, [arena(["A", "B", "C"]), FixtureLeaderboard(spec)])["status"] == "unchanged"
+    assert not log.exists() or "рейтинг" not in log.read_text()
+    s = run_pin(rt, [arena(["A", "B", "C"]), FixtureLeaderboard({**spec, "pending": False})])
+    assert s["status"] == "edited" and s["ratings_post"] == {"status": "no_changes"}
+    assert "<b>Агенты: надёжность</b>\n🥇 GPT-6.1 Sol" in rt.tg.edited[-1][1]
+    assert log.read_text().count("появился рейтинг «Агенты: надёжность»") == 1
+    run_pin(rt, [arena(["A", "B", "C"]), FixtureLeaderboard({**spec, "pending": False})])
+    assert log.read_text().count("появился рейтинг") == 1
+
+
 def test_no_permitted_source_means_no_rating_block(cfg, tmp_path, now) -> None:
     rt = make_rt(cfg, tmp_path, now)
     run_pin(rt, [])
