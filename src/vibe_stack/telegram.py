@@ -94,10 +94,16 @@ class Telegram:
             payload["link_preview_options"] = {"url": preview_url}
         return int(self._call("sendMessage", payload, idempotent=False)["message_id"])
 
-    def edit_message_text(self, chat_id: str, message_id: int, text: str) -> None:
+    def edit_message_text(self, chat_id: str, message_id: int, text: str, *, preview_url: str | None = None,
+                          image_url: str | None = None) -> None:
+        """Без preview_url и image_url превью выключено (закреп); с ними — как при отправке поста."""
+        preview: dict[str, Any] = {"is_disabled": True}
+        if image_url:
+            preview = {"url": image_url, "prefer_large_media": True, "show_above_text": True}
+        elif preview_url:
+            preview = {"url": preview_url}
         self._call("editMessageText", {"chat_id": chat_id, "message_id": message_id, "text": text,
-                                       "parse_mode": "HTML", "link_preview_options": {"is_disabled": True}},
-                   idempotent=True)
+                                       "parse_mode": "HTML", "link_preview_options": preview}, idempotent=True)
 
     def pin_chat_message(self, chat_id: str, message_id: int) -> None:
         self._call("pinChatMessage", {"chat_id": chat_id, "message_id": message_id, "disable_notification": True},
@@ -131,7 +137,8 @@ class DryRunTelegram:
         (self.out / f"msg{-mid:03d}.html").write_text(text, encoding="utf-8")
         return mid
 
-    def edit_message_text(self, chat_id: str, message_id: int, text: str) -> None:
+    def edit_message_text(self, chat_id: str, message_id: int, text: str, *, preview_url: str | None = None,
+                          image_url: str | None = None) -> None:
         self.edited.append((message_id, text))
         self.texts[message_id] = text
         (self.out / f"edit{abs(message_id):03d}.html").write_text(text, encoding="utf-8")

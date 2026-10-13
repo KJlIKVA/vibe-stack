@@ -106,6 +106,61 @@ def tidy(body: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text) if changed else text
 
 
+_ANALYSIS_LEAD = re.compile(r"^\s*<b>\s*О ч[её]м статья\s*:?\s*</b>\s*[—–:-]?\s*", re.IGNORECASE)
+_ANALYSIS_HEAD = re.compile(r"^\s*<b>\s*(Что здесь любопытно или спорно|Что с этим делать читателю)\s*:?\s*</b>"
+                            r"\s*[—–:-]?\s*(.*?)\s*$", re.IGNORECASE)
+# строка, которая начинает новый пункт, а не продолжает абзац: подзаголовок, ссылка, код, список, таймкод, эмодзи
+_OWN_LINE = re.compile(r"^(<b>|<i>|<code>|<a\s|<blockquote|[•*·–—-]\s|\d{1,2}[.):]|[^\w«\"'(<])")
+_PLAIN_LABEL = re.compile(r"^[^.!?:<]{1,40}:\s")  # «Кому подойдёт: …»
+_SENTENCE_END = re.compile(r"[.!?…»\")]$")
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?…])\s+(?=[A-ZА-ЯЁ«\"0-9<])")  # «т. е.» не режем: дальше строчная
+MAX_SENTENCES = 3
+
+
+def _cap(s: str) -> str:
+    return s[:1].upper() + s[1:]
+
+
+def _split_long(line: str) -> str:
+    """Абзац длиннее MAX_SENTENCES предложений — на абзацы поровну, теги не разрываем."""
+    if _OWN_LINE.match(line):
+        return line
+    parts = _SENTENCE_BREAK.split(line)
+    if len(parts) <= MAX_SENTENCES or not all(_balanced(p) for p in parts):
+        return line
+    n = -(-len(parts) // MAX_SENTENCES)
+    size = -(-len(parts) // n)
+    return "\n\n".join(" ".join(parts[i:i + size]) for i in range(0, len(parts), size))
+
+
+def paragraphs(body: str) -> str:
+    """Решение 66: текст абзацами. Модель ставила каждое предложение на свою строку без пустых строк — пост читался
+    как стена строк. Строки одной мысли склеиваются подряд, абзац длиннее трёх предложений делится, подписи
+    разбора: без «О чём статья», а «Что здесь любопытно или спорно» и «Что с этим делать читателю» — отдельной
+    строкой, после неё пустая строка. Длинные тире — обычным дефисом. Применяется и к постам в очереди: подвал
+    пересобирается при отправке."""
+    lines: list[str] = []
+    for raw in body.split("\n"):
+        line = raw.rstrip()
+        if m := _ANALYSIS_LEAD.match(line):
+            line = _cap(line[m.end():])
+        elif m := _ANALYSIS_HEAD.match(line):
+            lines += ["", f"<b>{_cap(m.group(1))}:</b>", ""]
+            line = _cap(m.group(2))
+            if not line:
+                continue
+        prev = lines[-1] if lines else ""
+        plain_prev = html.unescape(_TAG_RE.sub("", prev)).strip()
+        if (len(lines) >= 2 and line and prev and _SENTENCE_END.search(plain_prev)
+                and not _OWN_LINE.match(line.lstrip()) and not _PLAIN_LABEL.match(line.lstrip())):
+            lines[-1] = f"{prev} {line.strip()}"  # продолжение той же мысли — в ту же строку
+        else:
+            lines.append(line)
+    text = "\n".join(_split_long(ln) for ln in lines).strip("\n")
+    # длинное и среднее тире — обычным дефисом (ваше решение): «API — способ…» → «API - способ…», «1–3» → «1-3»
+    return re.sub(r"\n{3,}", "\n\n", text).replace("—", "-").replace("–", "-")
+
+
 def apply(post_html: str, *, source_url: str, rubric: Rubric, template: str = "") -> str:
     """Срезает подвал модели (и старый формат) и ставит единый подвал кода."""
     lines = post_html.rstrip().split("\n")
@@ -115,5 +170,5 @@ def apply(post_html: str, *, source_url: str, rubric: Rubric, template: str = ""
     lines = [ln for ln in lines if not _is_check_line(ln)]
     allowed = allowed_hashtags(rubric, template)
     tags = [t for t in dict.fromkeys(reversed(found)) if t in allowed] or allowed[:1]
-    body = tidy("\n".join(lines)).rstrip()
+    body = paragraphs(tidy("\n".join(lines))).rstrip()
     return body + "\n\n" + footer(source_url, tags)

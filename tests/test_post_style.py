@@ -54,7 +54,8 @@ def test_footer_drops_check_mark_in_the_middle(cfg) -> None:
     post = (body + "\n✅ Сверено с первоисточником  \n<b>Где взять:</b> по ссылке\n\n"
             + f'<a href="{SRC}">Ссылка</a> · #книга')
     out = footer.apply(post, source_url=SRC, rubric=rubric(cfg, "book_video"), template=template(cfg, "book_video"))
-    assert out == body + "\n<b>Где взять:</b> по ссылке\n\n" + NEW_FOOTER + "#книга"
+    expected = body.replace("—", "-") + "\n<b>Где взять:</b> по ссылке\n\n"  # длинное тире — дефисом (решение 66)
+    assert out == expected + NEW_FOOTER + "#книга"
 
 
 @pytest.mark.parametrize(("line", "expected"), [
@@ -232,3 +233,46 @@ def test_new_model_notes_follow_the_template() -> None:
 def test_triage_asks_for_price_and_comparison_for_new_models() -> None:
     text = prompts.load("triage_U")
     assert "new_model" in text and "цена" in text and "бенчмарков" in text
+
+
+# --- абзацы и тире (решение 66) ---------------------------------------------------------------------------
+# модель ставила каждое предложение на свою строку с «  » в конце (жёсткий перенос Markdown)
+BROKEN = ("🧠 <b>Мнение ИИ: больше контроля над телеметрией</b>\n\n"
+          "<b>О чём статья</b> — в статье сказано, что Copilot связывает телеметрию с пользователем.  \n"
+          "Телеметрия — технические данные о работе.  \n"
+          "Промпты не собираются.  \n"
+          "Настройка <code>telemetry.capture.identity</code> добавляет логин GitHub.  \n"
+          "Сбор выключен по умолчанию.\n\n"
+          "<b>Что здесь любопытно или спорно</b> — на наш взгляд, полезно разделение категорий.  \n"
+          "Так проще выбирать нужные данные.\n\n"
+          "<b>Что с этим делать читателю</b> — определите нужные категории телеметрии.")
+
+FIXED = """🧠 <b>Мнение ИИ: больше контроля над телеметрией</b>
+
+В статье сказано, что Copilot связывает телеметрию с пользователем. Телеметрия - технические данные о работе. \
+Промпты не собираются.
+
+Настройка <code>telemetry.capture.identity</code> добавляет логин GitHub. Сбор выключен по умолчанию.
+
+<b>Что здесь любопытно или спорно:</b>
+
+На наш взгляд, полезно разделение категорий. Так проще выбирать нужные данные.
+
+<b>Что с этим делать читателю:</b>
+
+Определите нужные категории телеметрии."""
+
+
+def test_analysis_post_is_split_into_paragraphs(cfg) -> None:
+    """Строки одной мысли — подряд, мысли — абзацами, без подписи «О чём статья», подзаголовки отдельно."""
+    out = footer.apply(BROKEN, source_url=SRC, rubric=rubric(cfg, "analysis"))
+    assert out == FIXED + "\n\n" + NEW_FOOTER + "#разбор"
+    assert footer.apply(out, source_url=SRC, rubric=rubric(cfg, "analysis")) == out  # повторно не меняется
+
+
+def test_paragraphs_keep_labels_lists_and_links_on_their_own_lines() -> None:
+    post = ("📚 <b>Книга</b> — автор.\n\nО чём: агенты.  \nПро тесты.\nКому подойдёт: новичкам.\n"
+            "• глава 1\n• глава 2\n<b>Где взять:</b> бесплатно.\n<code>npx skills add x</code>")
+    assert footer.paragraphs(post) == (
+        "📚 <b>Книга</b> - автор.\n\nО чём: агенты. Про тесты.\nКому подойдёт: новичкам.\n"
+        "• глава 1\n• глава 2\n<b>Где взять:</b> бесплатно.\n<code>npx skills add x</code>")
