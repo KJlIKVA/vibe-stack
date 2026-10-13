@@ -20,7 +20,6 @@ from .models import PostRecord, Status
 class BoardSettings(BaseModel):
     pause: bool = False
     regular_per_day: int | None = None
-    urgent_per_day: int | None = None
     publish_slots: list[str] | None = None
     tz: str | None = None
 
@@ -56,10 +55,8 @@ def validate_settings(s: BoardSettings) -> BoardSettings:
             ZoneInfo(s.tz)
         except (ZoneInfoNotFoundError, ValueError) as e:
             raise BoardUnavailable(f"неверный часовой пояс TZ: {s.tz!r}") from e
-    for name in ("regular_per_day", "urgent_per_day"):
-        v = getattr(s, name)
-        if v is not None and v < 0:
-            raise BoardUnavailable(f"отрицательный лимит {name}")
+    if s.regular_per_day is not None and s.regular_per_day < 0:
+        raise BoardUnavailable("отрицательный лимит regular_per_day")
     return s
 
 

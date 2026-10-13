@@ -60,7 +60,7 @@ class ChannelConfig(BaseModel):
 
 class Limits(BaseModel):
     regular_per_day: int = 3
-    urgent_per_day: int = 2
+    urgent_per_day: int = 20  # предохранитель от сбоя, а не лимит: у срочных лимита нет (решение 65)
 
 
 class DiscussionGate(BaseModel):
@@ -121,7 +121,7 @@ class Collect(BaseModel):
 class Urgent(BaseModel):
     max_item_age_hours: int = 24
     events: list[str] = Field(default_factory=list)
-    new_model_max_chars: int = 900  # пост о новой модели: цена и сравнение не помещаются в 500 знаков
+    new_model_max_chars: int = 1200  # пост о новой модели: для чего, сравнение, цена — в 500 знаков не помещаются
 
 
 class ImagesConfig(BaseModel):
@@ -131,6 +131,11 @@ class ImagesConfig(BaseModel):
     max_figures: int = 8  # сколько картинок статьи показывать модели, чтобы выбрать таблицу бенчмарков/цен
 
 
+class ModelPage(BaseModel):
+    id: str   # регулярное выражение для id модели в записи changelog (`claude-haiku-5-5`)
+    url: str  # адрес страницы анонса, {id} — id модели
+
+
 class Fetch(BaseModel):
     timeout_s: float = 20
     max_bytes: int = 3_000_000
@@ -138,6 +143,8 @@ class Fetch(BaseModel):
     user_agent: str = "VibeStackBot/0.1"
     # сайты, которые не пускают роботов из облака: при 403 — последняя копия из web.archive.org (решение 48)
     archive_fallback_hosts: list[str] = Field(default_factory=list)
+    # запись changelog о выходе модели дополняется страницей анонса (решение 65): хост changelog → правило
+    model_pages: dict[str, ModelPage] = Field(default_factory=dict)
 
 
 class Dedup(BaseModel):
@@ -198,6 +205,9 @@ class SourceConfig(BaseModel):
     # reddit (решение 64): в этих сабреддитах пост со своим текстом не короче min_body_chars — обсуждение
     discussion_subreddits: list[str] = Field(default_factory=list)
     min_body_chars: int = 400
+    # решение 65: источник самой компании — разработчика моделей (Anthropic, OpenAI, Google). Пост о новой модели
+    # отсюда — главный: его не остановит пост о той же модели с чужого сайта (GitHub Copilot, облака)
+    model_vendor: bool = False
 
 
 class SandboxConfig(BaseModel):

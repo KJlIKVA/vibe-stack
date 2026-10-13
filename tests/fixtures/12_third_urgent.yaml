@@ -1,15 +1,14 @@
 id: "12"
-description: Третье срочное за день → не публикуется сразу, остаётся в очереди обычных
+description: Третье срочное за день → публикуется сразу (у срочных нет дневного лимита, решение 65)
 scenario: urgent
 preseed: {urgent_published_today: 2}
 expected:
-  decision: queued_regular
+  decision: published
   rubric: urgent
-  sent: 0
-  board_statuses: ["Одобрено"]
+  sent: 1
+  board_statuses: ["Опубликовано"]
   summary:
-    summary.published: 0
-    summary.queued_regular: 1
+    summary.published: 1
 candidates:
   -
     source: openai-news

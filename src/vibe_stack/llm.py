@@ -75,6 +75,7 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         "hard_stops": _HARD_STOPS,
         "reason": _STR,
         "claims": _STR_LIST,
+        "model": _STR,
     }),
     "image": _obj({
         "index": {"type": "integer"},

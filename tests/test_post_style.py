@@ -222,7 +222,8 @@ def test_new_model_notes_follow_the_template() -> None:
     notes = prompts.load("model_release")
     out = prompts.write_prompt(["c1"], {"category": "urgent", "url": "u", "title": "t", "mode": "urgent"},
                                "urgent", "🚨", "#срочно", notes=notes)
-    assert out.index("до 500 знаков") < out.index("<b>Цена:</b>") < out.index("до 900 знаков")
+    assert out.index("до 500 знаков") < out.index("<b>Для чего:</b>") < out.index("<b>Сравнение:</b>") \
+        < out.index("<b>Цена:</b>") < out.index("до 1200 знаков")
     assert "<новая_модель>" in out
     assert "<новая_модель>" not in prompts.write_prompt(
         ["c1"], {"category": "urgent", "url": "u", "title": "t", "mode": "urgent"}, "urgent", "🚨", "#срочно")

@@ -1,12 +1,16 @@
 """Срочный контур: белый список → условия срочности → проверка B (urgent) → короткий пост → сразу в канал.
 
 Срочное определяется не баллами: (1) источник в белом списке и ссылка на его официальный домен,
-(2) событие из перечня urgent.events (решает промпт U, перечень проверяет код).
+(2) событие из перечня urgent.events (решает промпт U, перечень проверяет код). Обычного дневного лимита у
+срочных нет — срочное на то и срочное (решение 65). Есть только предохранитель от сбоя: больше
+limits.urgent_per_day (20) за день срочные не выходят, лишние ждут в очереди обычных, а админу приходит оповещение.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -35,6 +39,46 @@ def is_official(c: Candidate) -> bool:
     return c.whitelist and any(same_site(c.domain, d) for d in c.official_domains)
 
 
+_MODEL_NOISE = {"claude", "anthropic", "openai", "google", "deepmind", "model", "the", "new"}
+MODEL_MEMORY_DAYS = 30
+
+
+def model_key(name: str) -> str:
+    """Ключ модели для «один пост на модель»: «Claude Haiku 5.5», «claude-haiku-5-5» и «Haiku 5.5» → «haiku 5.5»;
+    «GPT-6.1 Sol» и «gpt-6.1-sol» → «gpt 6.1 sol»."""
+    out: list[str] = []
+    for w in re.findall(r"[a-z]+|\d+(?:\.\d+)*", name.lower()):
+        if w in _MODEL_NOISE:
+            continue
+        if w.isdigit() and out and re.fullmatch(r"\d+(?:\.\d+)*", out[-1]):
+            out[-1] += "." + w  # id через дефисы: 5-5 → 5.5
+        else:
+            out.append(w)
+    return " ".join(out)
+
+
+def model_posted(rt: Runtime, key: str) -> dict[str, Any] | None:
+    """Пост о модели за последние MODEL_MEMORY_DAYS дней: {"day": …, "vendor": от самой компании или нет}."""
+    raw = rt.state.get(f"model_post:{key}")
+    if not raw:
+        return None
+    seen = json.loads(raw)
+    if (rt.today() - datetime.fromisoformat(seen["day"]).date()).days > MODEL_MEMORY_DAYS:
+        return None
+    return seen
+
+
+def remember_model(rt: Runtime, key: str, vendor: bool) -> None:
+    if (seen := model_posted(rt, key)) and seen["vendor"]:
+        return
+    rt.state.put(f"model_post:{key}", json.dumps({"day": rt.today().isoformat(), "vendor": vendor}))
+
+
+def is_vendor(rt: Runtime, c: Candidate) -> bool:
+    """Источник самой компании — разработчика модели (model_vendor в config.yaml)."""
+    return any(s.model_vendor for s in rt.cfg.sources if s.name == c.source)
+
+
 def urgent_date(c: Candidate) -> datetime | None:
     """Дата события: публикация. Дата правки записи фида старую новость свежей не делает
     (исключение — sitemap: там есть только lastmod, поэтому дату дополнительно сверяем по странице)."""
@@ -55,7 +99,6 @@ def run_urgent(rt: Runtime) -> dict[str, Any]:
     if settings.pause:
         summary["status"] = "paused"
         return summary
-    limit = settings.urgent_per_day if settings.urgent_per_day is not None else rt.cfg.limits.urgent_per_day
     rubrics = rt.rubrics()
     rubric = rubrics["urgent"]
     if not rubric.enabled:
@@ -63,7 +106,7 @@ def run_urgent(rt: Runtime) -> dict[str, Any]:
         return summary
     try:
         # одобренные человеком срочные (режим approve) выходят первыми
-        summary["published"] += _publish_approved(rt, limit)
+        summary["published"] += _publish_approved(rt)
     except BoardUnavailable as e:
         rt.notifier.notify(f"срочный контур остановлен: {e}")
         summary["status"] = "board_unavailable"
@@ -91,7 +134,7 @@ def run_urgent(rt: Runtime) -> dict[str, Any]:
             summary["not_urgent"] += 1
             continue
         try:
-            result = _process(rt, c, rubric, limit)
+            result = _process(rt, c, rubric)
         except BudgetExceeded as e:
             rt.notifier.notify(f"срочный контур остановлен: {e}")
             summary["stopped"] = str(e)
@@ -117,16 +160,32 @@ def urgent_sent_today(rt: Runtime) -> int:
     return max(rt.state.count_published(rt.today(), urgent=True), on_board)
 
 
-def _publish_approved(rt: Runtime, limit: int) -> int:
-    """Срочные, одобренные в Notion: в канал, если лимит позволяет, иначе — в очередь обычных."""
+def fuse_blown(rt: Runtime) -> bool:
+    """Предохранитель (решение 65): limits.urgent_per_day срочных за день — это уже похоже на сбой, а не на новости.
+    Лимит только из config.yaml: «Лимит срочных» в Notion больше не читается."""
+    limit = rt.cfg.limits.urgent_per_day
+    if urgent_sent_today(rt) < limit:
+        return False
+    key = f"urgent_fuse:{rt.today().isoformat()}"
+    if not rt.state.get(key):
+        rt.state.put(key, "1")
+        rt.notifier.notify(f"срочный контур: за сегодня вышло {limit} срочных — сработал предохранитель, это похоже "
+                           "на сбой. Следующие срочные до конца дня ждут в очереди обычных; проверьте лог срочного "
+                           "контура в GitHub Actions.")
+    return True
+
+
+def _publish_approved(rt: Runtime) -> int:
+    """Срочные, одобренные в Notion: сразу в канал; устаревшие для срочного или сверх предохранителя — в очередь
+    обычных."""
     done = 0
     window = timedelta(hours=rt.cfg.urgent.max_item_age_hours)
     for post in [p for p in rt.board.posts_with_status(Status.APPROVED) if p.urgent]:
         if rt.state.is_published_ref(post.ref or ""):
             continue
         stale = post.found_at is not None and rt.now() - post.found_at > window
-        if stale or urgent_sent_today(rt) >= limit:
-            why = "устарело для срочного" if stale else "лимит срочных исчерпан"
+        if stale or fuse_blown(rt):
+            why = "устарело для срочного" if stale else "сработал предохранитель срочных"
             rt.board.update_post(post.ref, urgent=False, reject_reason=f"{why} — в очереди обычных")
             continue
         if publish_post(rt, post, slot=None, urgent=True, counts_regular=False):
@@ -134,7 +193,7 @@ def _publish_approved(rt: Runtime, limit: int) -> int:
     return done
 
 
-def _process(rt: Runtime, c: Candidate, rubric: Rubric, limit: int) -> str:
+def _process(rt: Runtime, c: Candidate, rubric: Rubric) -> str:
     now = rt.now()
     doc = rt.fetcher.fetch(c.url, purpose="score")
     if not doc.ok:
@@ -159,13 +218,21 @@ def _process(rt: Runtime, c: Candidate, rubric: Rubric, limit: int) -> str:
         rt.decision(CONTOUR, c, "triage", "not_urgent", reasons)
         rt.state.mark_seen(_ukeys(c), c.id, "not_urgent", now)
         return "not_urgent"
+    # одна модель — один срочный пост (решение 65). Пост от самой компании главный: его не остановит пост о той же
+    # модели с чужого сайта (GitHub Copilot, облака), а такие посты после него уже не срочные
+    new_model = tri.event == "new_model"  # цена и сравнение с другими моделями — отдельным блоком (решение 47)
+    vendor = new_model and is_vendor(rt, c)
+    model = model_key(tri.model or c.title) if new_model else ""
+    if model and (seen := model_posted(rt, model)) and (seen["vendor"] or not vendor):
+        rt.decision(CONTOUR, c, "triage", "not_urgent", [f"model_already_posted:{model}"])
+        rt.state.mark_seen(_ukeys(c), c.id, "not_urgent", now)
+        return "not_urgent"
 
     v = verify(rt, c, tri.claims, mode="urgent")
     if not v.passed:
         rt.decision(CONTOUR, c, "verify", "rejected", v.reasons)
         rt.state.mark_seen(_ukeys(c), c.id, "verify_fail", now)
         return "rejected"
-    new_model = tri.event == "new_model"  # цена и сравнение с другими моделями — отдельным блоком (решение 47)
     w = write(rt, c, "urgent", rubric, v.approved, mode="urgent",
               notes=prompts.load("model_release") if new_model else None,
               max_chars=rt.cfg.urgent.new_model_max_chars if new_model else None)
@@ -176,23 +243,26 @@ def _process(rt: Runtime, c: Candidate, rubric: Rubric, limit: int) -> str:
 
     verify_json = v.result.model_dump() if v.result else None
     needs_approval = rubric.mode == "approve"
-    can_publish = needs_approval or urgent_sent_today(rt) < limit
+    can_publish = needs_approval or not fuse_blown(rt)
     post = PostRecord(
         title=c.title, rubric="urgent", status=Status.PENDING if needs_approval else Status.APPROVED,
         mode=rubric.mode, urgent=can_publish, source_url=c.url, source_domain=c.domain, found_at=now, html=w.html,
         verify=verify_json, candidate_id=c.id,
-        reject_reason="" if can_publish else "лимит срочных исчерпан — в очереди обычных",
+        reject_reason="" if can_publish else "сработал предохранитель срочных — в очереди обычных",
     )
     ref = rt.board.add_post(post)
     post = post.model_copy(update={"ref": ref})
     rt.state.mark_seen(_ukeys(c), c.id, "processed", now)
+    if model:
+        remember_model(rt, model, vendor)
     images.remember(rt, c.id, images.choose(rt, c, doc, new_model=new_model))
     if needs_approval or not can_publish:
         rt.state.mark_seen(c.keys, c.id, "queued", now)
         if needs_approval:
             rt.decision(CONTOUR, c, "board", "pending_approval", [], rubric="urgent")
             return "pending_approval"
-        rt.decision(CONTOUR, c, "limit", "queued_regular", [f"urgent_limit:{limit}"], rubric="urgent")
+        rt.decision(CONTOUR, c, "limit", "queued_regular", [f"urgent_fuse:{rt.cfg.limits.urgent_per_day}"],
+                    rubric="urgent")
         return "queued_regular"
     if publish_post(rt, post, slot=None, urgent=True, counts_regular=False):
         rt.decision(CONTOUR, c, "telegram", "published", [], rubric="urgent")

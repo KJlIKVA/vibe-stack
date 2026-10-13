@@ -170,6 +170,7 @@ class TriageResult(BaseModel):
     hard_stops: list[HardStop] = Field(default_factory=list)
     reason: str = ""
     claims: list[str] = Field(default_factory=list)
+    model: str = ""  # название новой модели при event new_model — один пост на модель (решение 65)
 
     @field_validator("reason")
     @classmethod

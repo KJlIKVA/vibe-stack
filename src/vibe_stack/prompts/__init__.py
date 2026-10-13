@@ -106,10 +106,11 @@ def footer_template(rubric_key: str, overlay: str) -> str:
 
 
 def triage_prompt(candidate: dict[str, Any], source_document: str) -> str:
+    # решения владельца о новой модели (решение 65) — отдельным блоком после текста ТЗ
     return render(load("triage_U"), {
         "candidate_json": json.dumps(candidate, ensure_ascii=False),
         "первоисточник, обрезанный": source_document,
-    })
+    }).rstrip("\n") + "\n\n" + load("triage_notes")
 
 
 def verify_prompt(claims: list[str], source_document: str, meta: dict[str, Any]) -> str:

@@ -89,7 +89,7 @@ def test_board_write_failure_is_not_retried_every_tick(cfg, tmp_path) -> None:
 
 
 def test_new_model_post_gets_price_notes_longer_limit_and_chart(cfg, tmp_path) -> None:
-    """Решение 47: в посте о новой модели — цена и сравнение (блок владельца, до 900 знаков) и график из статьи."""
+    """Решения 47, 65: в посте о новой модели — для чего, сравнение, цена (блок владельца, до 1200 знаков) и график."""
     fx = copy.deepcopy(BASE)
     cid = fx.candidates[0].id
     doc = fx.documents[next(iter(fx.documents))]

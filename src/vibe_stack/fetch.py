@@ -23,6 +23,11 @@ from .urls import canonical_url, github_repo, host_of, same_site
 
 log = logging.getLogger(__name__)
 
+# запись changelog о выходе модели (решение 65): её дополняют страница анонса и описание модели
+_LAUNCH = re.compile(r"\b(launch(?:ed|es|ing)?|releas(?:ed|es|ing)|introduc(?:e|ed|es|ing)|now available)\b",
+                     re.IGNORECASE)
+_MD_LINK = re.compile(r"\]\((https?://[^)\s]+)\)")
+_CODE_ID = re.compile(r"`([a-z0-9][a-z0-9.-]+)`")
 TEXT_TYPES = ("text/html", "text/plain", "text/markdown", "application/xhtml", "application/xml", "text/xml",
               "application/json", "application/rss", "application/atom")
 _RELEASE_PATH = re.compile(r"^/([^/]+)/([^/]+)/releases/tag/([^/?#]+)")
@@ -235,8 +240,39 @@ class HttpFetcher:
             return FetchedDoc(url=url, final_url=url, ok=False, http_status=status or 404, fetched_at=now,
                               error=f"HTTP {status}" if status >= 400 else "запись changelog не найдена")
         text = f"[запись changelog] {url.split('?')[0]}\n\n{entry.text()}"
+        image, figures = None, []
+        for link in self._launch_pages(url, entry.body):
+            if page := self._linked_page(link):
+                text += f"\n\n--- Страница, на которую указывает запись (официальный источник): {link} ---\n{page.text}"
+                image, figures = image or page.image, figures or page.figures
         return FetchedDoc(url=url, final_url=url, ok=True, http_status=status, fetched_at=now, title=entry.title,
-                          published_meta=entry.day.isoformat(), text=truncate(text, self.cfg.max_doc_chars))
+                          published_meta=entry.day.isoformat(), text=truncate(text, self.cfg.max_doc_chars),
+                          image=image, figures=figures)
+
+    def _launch_pages(self, url: str, body: str) -> list[str]:
+        """Страницы к записи о выходе модели: анонс по id модели (правило fetch.model_pages для хоста changelog —
+        там бенчмарки и цена) и описания моделей, на которые ссылается запись (/models/)."""
+        if not _LAUNCH.search(body):
+            return []
+        out: list[str] = []
+        if rule := self.cfg.model_pages.get(urlsplit(url).hostname or ""):
+            out += [rule.url.format(id=m) for m in _CODE_ID.findall(body) if re.fullmatch(rule.id, m)][:1]
+        out += [u for u in _MD_LINK.findall(body) if "/models/" in urlsplit(u).path]
+        return list(dict.fromkeys(out))[:3]
+
+    def _linked_page(self, link: str) -> FetchedDoc | None:
+        """Страница из записи: у документации — Markdown-версия (короче и чище), иначе обычная страница."""
+        limit = self.cfg.max_doc_chars // 2
+        try:
+            status, ctype, raw, _ = self._get(md_url(link))
+            if status < 400 and "markdown" in ctype and raw.strip():
+                return FetchedDoc(url=link, final_url=link, ok=True, fetched_at=self.clock(),
+                                  text=truncate(raw, limit))
+            page = self._generic(link)
+        except (httpx.HTTPError, UnsafeURL, ValueError) as e:
+            log.info("страница к записи changelog %s: %s", link, e)
+            return None
+        return page.model_copy(update={"text": truncate(page.text, limit)}) if page.ok else None
 
     def _youtube(self, url: str) -> FetchedDoc:
         """Видео — через YouTube Data API: страницы YouTube из облака закрыты. Субтитров нет — только описание."""

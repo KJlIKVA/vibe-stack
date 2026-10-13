@@ -8,6 +8,13 @@
     Update · Model: chat-latest
     Текст записи…
 
+Release notes Claude (решение 65, platform.claude.com/docs/en/release-notes/overview.md) — дата целиком в
+заголовке дня, записи дня — пункты списка, каждый пункт — отдельная запись:
+
+    ### October 7, 2026
+    * We've launched **Claude Haiku 5.5** (`claude-haiku-5-5`)…
+    * We've lowered the price of prompt cache reads…
+
 У записи нет своего адреса, поэтому адрес кандидата — страница changelog с параметром ?entry=<id>
 (параметр переживает канонизацию URL, якорь — нет). Тот же разбор использует загрузчик (fetch.py):
 документ для проверки — текст именно этой записи.
@@ -26,7 +33,8 @@ from ..config import SourceConfig
 from ..models import Candidate
 
 _MONTH_RE = re.compile(r"^##\s+([A-Za-z]+),?\s+(\d{4})\s*$")
-_DAY_RE = re.compile(r"^###\s+([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})\s*$")
+_DAY_RE = re.compile(r"^###\s+([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})(?:,\s*(\d{4}))?\s*$")
+_BULLET_RE = re.compile(r"^[*-]\s+")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 _MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
@@ -45,7 +53,8 @@ class Entry:
         return first.strip()[:160] or self.label
 
     def text(self) -> str:
-        return f"Дата записи: {self.day:%Y-%m-%d}\n{self.label}\n\n{self.body}".strip()
+        head = f"Дата записи: {self.day:%Y-%m-%d}" + (f"\n{self.label}" if self.label else "")
+        return f"{head}\n\n{self.body}".strip()
 
 
 def _slug(text: str, words: int = 8) -> str:
@@ -57,30 +66,44 @@ def parse_entries(md: str) -> list[Entry]:
     year = month = 0
     cur: dict[str, object] | None = None
 
-    def close() -> None:
-        if cur is None:
-            return
-        lines = [ln for ln in cur["lines"] if ln.strip()]  # type: ignore[attr-defined]
-        if not lines:
-            return
-        label, body = lines[0].strip(), "\n".join(lines[1:]).strip()
-        day = cur["day"]
-        assert isinstance(day, datetime)
+    def add(day: datetime, label: str, body: str) -> None:
         base = f"{day:%Y-%m-%d}-{_slug(label)}-{_slug(body, 5)}"
         eid, n = base, 2
         while any(e.id == eid for e in out):
             eid, n = f"{base}-{n}", n + 1
         out.append(Entry(id=eid, day=day, label=label, body=body))
 
+    def close() -> None:
+        if cur is None:
+            return
+        lines = [ln for ln in cur["lines"] if ln.strip()]  # type: ignore[attr-defined]
+        if not lines:
+            return
+        day = cur["day"]
+        assert isinstance(day, datetime)
+        if _BULLET_RE.match(lines[0]):
+            # день — список: каждый пункт со своими строками-продолжениями — отдельная запись
+            items: list[list[str]] = []
+            for ln in lines:
+                if _BULLET_RE.match(ln) or not items:
+                    items.append([_BULLET_RE.sub("", ln, count=1).strip()])
+                else:
+                    items[-1].append(ln.strip())
+            for item in items:
+                add(day, "", "\n".join(item).strip())
+            return
+        add(day, lines[0].strip(), "\n".join(lines[1:]).strip())
+
     for line in md.splitlines():
         if m := _MONTH_RE.match(line):
             close()
             cur = None
             month, year = _MONTHS.get(m.group(1)[:3].lower(), 0), int(m.group(2))
-        elif (m := _DAY_RE.match(line)) and year:
+        elif (m := _DAY_RE.match(line)) and (year or m.group(3)):
             close()
-            mon = _MONTHS.get(m.group(1).lower(), month)
-            cur = {"day": datetime(year, mon, int(m.group(2)), 23, 59, tzinfo=UTC), "lines": []}
+            mon = _MONTHS.get(m.group(1)[:3].lower(), month)
+            y = int(m.group(3)) if m.group(3) else year
+            cur = {"day": datetime(y, mon, int(m.group(2)), 23, 59, tzinfo=UTC), "lines": []}
         elif cur is not None:
             cur["lines"].append(line)  # type: ignore[attr-defined]
     close()

@@ -39,7 +39,9 @@ llm:
 
 limits:
   regular_per_day: 32         # потолок, а не план: все слоты дня (решение 59: важнее не обрезать свежее)
-  urgent_per_day: 2
+  # у срочных лимита нет (решение 65); 20 в день — предохранитель на случай сбоя: дальше срочные ждут в очереди
+  # обычных, админу — оповещение. «Лимит срочных» в Notion не читается.
+  urgent_per_day: 20
 
 gate:
   min_total: 10               # из 15
@@ -85,7 +87,7 @@ collect:
 
 urgent:
   max_item_age_hours: 24
-  new_model_max_chars: 900    # пост о новой модели: цена и сравнение с другими моделями (решение 47)
+  new_model_max_chars: 1200   # пост о новой модели: для чего, сравнение и бенчмарки, цена (решения 47, 65)
   events: [new_model, major_release, pricing_or_limits_change, vulnerability]
 
 # Картинка поста — большое превью над текстом: главная картинка страницы (og:image) или карточка репозитория
@@ -101,6 +103,9 @@ fetch:
   user_agent: "VibeStackBot/0.1 (+https://github.com/KJlIKVA/vibe-stack)"
   # openai.com отвечает роботам из GitHub Actions 403 — тогда берём последнюю копию страницы из web.archive.org
   archive_fallback_hosts: [openai.com]
+  # решение 65: запись release notes Claude о выходе модели дополняется её анонсом на anthropic.com (бенчмарки, цена)
+  model_pages:
+    platform.claude.com: {id: "claude-[a-z]+-[0-9][a-z0-9-]*", url: "https://www.anthropic.com/{id}"}
 
 dedup:
   seen_ttl_days: 60           # отклонённое не пересматриваем столько дней; опубликованное — никогда
@@ -174,6 +179,7 @@ sources:
     type: rss
     url: https://openai.com/news/rss.xml
     whitelist: true
+    model_vendor: true
     official_domains: [openai.com]
     contours: [collect, urgent]
   - name: openai-api-changelog
@@ -184,13 +190,27 @@ sources:
     title_prefix: "OpenAI API: "
     max_age_days: 3   # в changelog записи за месяцы — новостью считаем только последние дни
     whitelist: true
+    model_vendor: true
     official_domains: [openai.com]
+    contours: [collect, urgent]
+  - name: claude-release-notes
+    # решение 65: новые модели Anthropic анонсирует не в /news/, а на страницах вида anthropic.com/claude-haiku-5-5
+    # без даты в sitemap — их ловим по датированным release notes API. Запись о выходе модели код дополняет
+    # анонсом (fetch.model_pages) и описанием модели из документации; каждая запись — отдельный кандидат.
+    type: md_changelog
+    url: https://platform.claude.com/docs/en/release-notes/overview
+    title_prefix: "Claude API: "
+    max_age_days: 3
+    whitelist: true
+    model_vendor: true
+    official_domains: [claude.com, anthropic.com]
     contours: [collect, urgent]
   - name: anthropic-news
     type: sitemap
     url: https://www.anthropic.com/sitemap.xml
     path_prefix: /news/
     whitelist: true
+    model_vendor: true
     official_domains: [anthropic.com]
     contours: [collect, urgent]
     # RSS у Anthropic нет. Новая страница в /news/ = кандидат; заголовок и дату публикации код берёт со страницы
@@ -205,6 +225,7 @@ sources:
     type: rss
     url: https://deepmind.google/blog/rss.xml
     whitelist: true
+    model_vendor: true
     official_domains: [deepmind.google, blog.google]
     contours: [collect, urgent]
   - name: github-changelog

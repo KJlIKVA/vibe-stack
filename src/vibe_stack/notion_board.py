@@ -122,7 +122,6 @@ SCHEMAS: dict[str, Callable[[Config], dict[str, Any]]] = {
         "Name": {"title": {}},
         "Пауза": {"checkbox": {}},
         "Лимит обычных": {"number": {}},
-        "Лимит срочных": {"number": {}},
         "Время публикаций": {"rich_text": {}},
         "TZ": {"rich_text": {}},
     },
@@ -230,11 +229,10 @@ class NotionBoard:
             log.warning("в «Настройках» %d строк — значения беру из первой, паузу — из любой", len(rows))
         p = rows[0]["properties"]
         slots = [s.strip() for s in _plain(p.get("Время публикаций")).replace(";", ",").split(",") if s.strip()]
-        reg, urg = _number(p.get("Лимит обычных")), _number(p.get("Лимит срочных"))
+        reg = _number(p.get("Лимит обычных"))  # «Лимит срочных» больше не читаем: у срочных лимита нет (решение 65)
         return validate_settings(BoardSettings(
             pause=paused,
             regular_per_day=int(reg) if reg is not None else None,
-            urgent_per_day=int(urg) if urg is not None else None,
             publish_slots=slots or None,
             tz=_plain(p.get("TZ")).strip() or None,
         ))
@@ -423,7 +421,6 @@ class NotionBoard:
                 self._create_row(name, {
                     "Name": {"title": _text("Настройки")}, "Пауза": {"checkbox": True},
                     "Лимит обычных": {"number": self.cfg.limits.regular_per_day},
-                    "Лимит срочных": {"number": self.cfg.limits.urgent_per_day},
                     "Время публикаций": {"rich_text": _text(", ".join(self.cfg.schedule.publish_slots))},
                     "TZ": {"rich_text": _text(self.cfg.channel.tz)},
                 })
