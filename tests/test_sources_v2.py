@@ -264,12 +264,13 @@ def test_backlog_allows_second_post_a_day(cfg, now, queued, allowed) -> None:
 
 def test_video_backlog_allows_four_a_day(cfg, now) -> None:
     """Решение 62: при очереди видео от 5 — до четырёх в день (было два: очередь росла, видео устаревали)."""
-    hist = [published(f"Talk{i} unique{i}", "book_video", f"https://h{i}.dev/", now - timedelta(hours=1 + i))
-            for i in range(3)]
-    q = [post(f"Video{i} special{i}", "book_video", f"https://v{i}.dev/", score=15, now=now) for i in range(6)]
+    yt = "https://www.youtube.com/watch?v="
+    hist = [published(f"Talk{i} unique{i}", "book_video", f"{yt}h{i}", now - timedelta(hours=1 + i)) for i in range(3)]
+    q = [post(f"Video{i} special{i}", "book_video", f"{yt}v{i}", score=15, now=now) for i in range(6)]
     groups = {h.ref: "watch" for h in hist} | {p.ref: "watch" for p in q}
-    assert _plan(cfg, now, q, hist, groups).post is not None  # четвёртое
-    hist.append(published("Talk3 unique3", "book_video", "https://h3.dev/", now - timedelta(minutes=30)))
+    # четвёртое за день — и лимит «3 поста с домена» youtube.com ему не мешает (решение 63)
+    assert _plan(cfg, now, q, hist, groups).post is not None
+    hist.append(published("Talk3 unique3", "book_video", f"{yt}h3", now - timedelta(minutes=30)))
     res = _plan(cfg, now, q, hist, groups | {hist[-1].ref: "watch"})
     assert res.post is None and "дневной максимум рубрики" in str(res.skipped)  # пятого нет
 

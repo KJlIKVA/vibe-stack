@@ -93,6 +93,35 @@ def test_topic_tokens_repo_match() -> None:
     assert same_topic(a, b, 0.9)
 
 
+def test_official_releases_go_first_and_are_not_blocked(cfg, now) -> None:
+    """Решение 63. До 13.10 выпуски claude-code v2.1.294–296 и codex 0.162.1 стояли в очереди и устаревали:
+    «тема была за 7 дней» (выпуск того же репозитория уже вышел), а посты openai.com упирались в лимит домена."""
+    from vibe_stack.planner import Official
+
+    official = Official.from_sources(cfg.sources)
+    rel = "https://github.com/anthropics/claude-code/releases/tag/"
+    hist = [published("anthropics/claude-code v2.1.293", "tool", rel + "v2.1.293", now - timedelta(days=2))]
+    hist += [published(f"OpenAI story {w}", "case", f"https://openai.com/index/{w}", now - timedelta(hours=h))
+             for h, w in [(1, "alpha"), (2, "beta"), (3, "gamma")]]
+    release = post("anthropics/claude-code v2.1.296", "tool", rel + "v2.1.296", score=10, now=now)
+    news = post("Sophos cuts investigation time", "case", "https://openai.com/index/sophos", score=11, now=now)
+    other = post("A terminal for agents", "tool", "https://x.dev/term", score=15, now=now)
+    kw = {"today": local_date(now, "Europe/Moscow"), "now": now, "cfg": cfg.planner, "rubric_enabled": ENABLED,
+          "soft_rubric_repeat": True}
+    old = pick_next([release, news, other], hist, **kw)  # без признака «официальный» — как было
+    assert old.post is other and set(old.skipped) == {release.ref, news.ref}
+    res = pick_next([release, news, other], hist, official=official, **kw)
+    assert res.post is release and not res.skipped  # официальное — раньше поста с баллом выше
+    # …и раньше поста другой рубрики: последним выходил «case», но Sophos всё равно первый
+    assert pick_next([news, other], hist, official=official, **kw).post is news
+    # повтор есть повтор: пересказ того же выпуска в чужом блоге и тот же выпуск ещё раз — не выходят
+    retell = post("anthropics/claude-code v2.1.293 released", "tool", "https://blog.dev/cc-293", now=now)
+    same = post("anthropics/claude-code v2.1.293", "tool", rel + "v2.1.293", now=now)
+    assert pick_next([retell, same], hist, official=official, **kw).post is None
+    # чужой репозиторий официальным не становится: лимит домена и правило репозитория для него прежние
+    assert not official("https://github.com/acme/tool") and official(rel + "v2.1.296")
+
+
 def test_spread_evenly_over_free_slots() -> None:
     grid = slot_grid(datetime(2026, 10, 7).date(), [f"{h:02d}:{m:02d}" for h in range(8, 24) for m in (0, 30)],
                      "Europe/Moscow")

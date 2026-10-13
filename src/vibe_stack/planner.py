@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
-from .config import Planner
+from .config import Planner, SourceConfig
 from .models import PostRecord
 from .storage import PublishedRow
 from .timeutil import week_start
-from .urls import canonical_url, github_repo, host_of
+from .urls import canonical_url, github_repo, host_of, same_site
 
 _STOP = {
     "the", "and", "for", "with", "your", "you", "from", "that", "this", "into", "how", "new", "now", "are",
@@ -67,6 +68,35 @@ def domain_key(url: str, domain: str = "") -> str:
     if repo := github_repo(url):
         return f"github.com/{repo.split('/')[0]}"
     return domain or host_of(url)
+
+
+@dataclass(frozen=True)
+class Official:
+    """Официальные источники (решение 63): сайты компаний и репозитории их инструментов из белого списка
+    (openai.com, anthropic.com, deepmind.google, anthropics/claude-code, openai/codex, google-gemini/gemini-cli…).
+    github.com целиком официальным не считается — только репозитории источников github_releases."""
+
+    hosts: frozenset[str] = frozenset()
+    repos: frozenset[str] = frozenset()
+
+    @classmethod
+    def from_sources(cls, sources: Iterable[SourceConfig]) -> Official:
+        hosts: set[str] = set()
+        repos: set[str] = set()
+        for s in sources:
+            if not s.whitelist:
+                continue
+            if s.repo:
+                repos.add(s.repo.lower())
+            else:
+                hosts.update(d.lower() for d in s.official_domains if d.lower() != "github.com")
+        return cls(frozenset(hosts), frozenset(repos))
+
+    def __call__(self, url: str) -> bool:
+        if repo := github_repo(url):
+            return repo in self.repos
+        host = host_of(url)
+        return bool(host) and any(same_site(host, d) for d in self.hosts)
 
 
 # группа «Книги/видео» по хештегу поста (решение 52): видео и подкасты — «что посмотреть и послушать» с дневным
@@ -143,9 +173,13 @@ def pick_next(
     weekly_max: dict[str, int] | None = None,
     soft_rubric_repeat: bool = False,
     groups: dict[str, str | None] | None = None,
+    official: Callable[[str], bool] | None = None,
 ) -> Pick:
     """history — опубликованное (обычное и срочное) минимум за topic_repeat_days дней.
-    groups — ref поста (в очереди и в истории) → группа «Книги/видео» (media_group), для лимитов по группам."""
+    groups — ref поста (в очереди и в истории) → группа «Книги/видео» (media_group), для лимитов по группам.
+    official — официальный ли источник по ссылке (Official): у таких постов приоритет, нет лимита на домен, и разные
+    публикации одного официального источника не считаются повтором темы (решение 63)."""
+    is_official = official or (lambda _url: False)
     weekly_min = cfg.weekly_min if weekly_min is None else weekly_min
     weekly_max = cfg.weekly_max if weekly_max is None else weekly_max
     regular = [h for h in history if h.counts_regular and not h.urgent]
@@ -179,7 +213,8 @@ def pick_next(
         return normal.get(key)
     recent_cutoff = now - timedelta(days=cfg.topic_repeat_days)
     recent_topics = [
-        (topic_tokens(h.title, h.source_url), canonical_url(h.source_url) if h.source_url else "")
+        (topic_tokens(h.title, h.source_url), canonical_url(h.source_url) if h.source_url else "",
+         domain_key(h.source_url, h.domain) if h.source_url and is_official(h.source_url) else None)
         for h in history if h.published_at >= recent_cutoff
     ]
 
@@ -192,7 +227,10 @@ def pick_next(
         if last_rubric and p.rubric == last_rubric and not soft_rubric_repeat:
             reasons.append("та же рубрика подряд")
         domain = domain_key(p.source_url, p.source_domain)
-        if domains_today.count(domain) >= cfg.max_per_domain_per_day:
+        own = domain if p.source_url and is_official(p.source_url) else None  # официальный источник поста
+        # лимит на домен — не для официальных и не для видео, подкастов и книг: у них свои дневные лимиты,
+        # а youtube.com — площадка, а не источник (решение 63)
+        if not own and not groups.get(p.ref or "") and domains_today.count(domain) >= cfg.max_per_domain_per_day:
             reasons.append(f"домен {domain} уже был сегодня")
         for k in keys(p.rubric, p.ref):
             if (mx := limit(k, weekly_max, cfg.backlog_weekly_max, week_counts)) is not None \
@@ -203,7 +241,10 @@ def pick_next(
                 reasons.append("дневной максимум рубрики")
         toks = topic_tokens(p.title, p.source_url)
         canon = canonical_url(p.source_url) if p.source_url else ""
-        if any((canon and canon == c) or same_topic(toks, t, cfg.topic_similarity) for t, c in recent_topics):
+        # другая страница того же официального источника — отдельный выпуск: claude-code v2.1.296 после v2.1.295,
+        # второй анонс Gemini в блоге DeepMind (решение 63)
+        if any((canon and canon == c) or (not (own and own == src) and same_topic(toks, t, cfg.topic_similarity))
+               for t, c, src in recent_topics):
             reasons.append(f"тема была за {cfg.topic_repeat_days} дн.")
         if reasons:
             skipped[p.ref or p.title] = reasons
@@ -212,12 +253,13 @@ def pick_next(
     if not ok:
         return Pick(None, skipped)
 
-    def priority(p: PostRecord) -> tuple[int, int, int, float]:
+    def priority(p: PostRecord) -> tuple[int, int, int, int, float]:
         need = weekly_min.get(p.rubric, 0) - week_counts.get(p.rubric, 0)
         found = p.found_at.timestamp() if p.found_at else 0.0
         repeat = 1 if last_rubric and p.rubric == last_rubric else 0
-        # 1) рубрики с невыполненной недельной квотой, 2) другая рубрика, чем у предыдущего поста,
-        # 3) баллы, 4) свежее — раньше (решение 59: важнее, чтобы вышло недавнее)
-        return (0 if need > 0 else 1, repeat, -(p.score or 0), -found)
+        official_first = 0 if p.source_url and is_official(p.source_url) else 1
+        # 1) рубрики с невыполненной недельной квотой, 2) официальные выпуски (решение 63), 3) другая рубрика, чем
+        # у предыдущего поста, 4) баллы, 5) свежее — раньше (решение 59: важнее, чтобы вышло недавнее)
+        return (0 if need > 0 else 1, official_first, repeat, -(p.score or 0), -found)
 
     return Pick(min(ok, key=priority), skipped)
