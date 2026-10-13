@@ -113,20 +113,26 @@ class GateResult:
         return not self.reasons
 
 
-def gate(score: ScoreResult, cfg: Config, rubrics: dict[str, Rubric]) -> GateResult:
-    """Сумма и пороги — только здесь, в коде."""
+def gate(score: ScoreResult, cfg: Config, rubrics: dict[str, Rubric], discussion: bool = False) -> GateResult:
+    """Сумма и пороги — только здесь, в коде. discussion — обсуждение на Reddit: только приём или кейс и пороги
+    строже (решение 64)."""
     total = score.scores.total
     reasons: list[str] = list(score.hard_stops)
     rubric = CATEGORY_TO_RUBRIC.get(score.category)
+    talk = cfg.gate.discussion
     if rubric is None:
         reasons.append("off_topic")
     elif not rubrics.get(rubric, Rubric(emoji="", hashtag="", title="", enabled=False)).enabled:
         reasons.append("rubric_disabled")
-    if total < cfg.gate.min_total:
+    elif discussion and rubric not in talk.rubrics:
+        reasons.append("discussion_not_practical")
+    if total < (max(cfg.gate.min_total, talk.min_total) if discussion else cfg.gate.min_total):
         reasons.append("low_score")
     if score.scores.verifiability < cfg.gate.min_verifiability:
         reasons.append("low_verifiability")
-    if rubric and score.scores.usefulness < cfg.gate.min_usefulness.get(rubric, 0):
+    min_usefulness = cfg.gate.min_usefulness.get(rubric, 0) if rubric else 0
+    if rubric and score.scores.usefulness < (max(min_usefulness, talk.min_usefulness) if discussion
+                                             else min_usefulness):
         reasons.append("low_usefulness")
     return GateResult(rubric, total, sorted(set(reasons), key=reasons.index))
 

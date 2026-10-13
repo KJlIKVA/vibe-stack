@@ -195,24 +195,6 @@ def test_rss_include_title_regex(cfg) -> None:
     assert [c.title for c in got] == ["Build AI Agents with Python"]
 
 
-REDDIT = """<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
-<entry><title>llama : add a GPU cache for MoE experts</title><link href="https://www.reddit.com/r/LocalLLaMA/comments/1/x/"/>
-<content type="html">&lt;a href="https://github.com/ggml-org/llama.cpp/pull/1"&gt;[link]&lt;/a&gt;</content></entry>
-<entry><title>I found a planet</title><link href="https://www.reddit.com/r/ClaudeAI/comments/2/y/"/>
-<content type="html">&lt;a href="https://www.reddit.com/r/ClaudeAI/comments/2/y/"&gt;[link]&lt;/a&gt;</content></entry>
-<entry><title>Benchmark chart</title><link href="https://www.reddit.com/r/ClaudeAI/comments/3/z/"/>
-<content type="html">&lt;a href="https://i.redd.it/abc.png"&gt;[link]&lt;/a&gt;</content></entry>
-</feed>"""
-
-
-def test_reddit_takes_only_external_links(cfg) -> None:
-    """Обсуждения и картинки Reddit роботам не открыть — берём только посты со ссылкой наружу (решение 48)."""
-    src = next(s for s in cfg.sources if s.name == "reddit")
-    got = rss.RSSSource(src, client({src.url: REDDIT})).collect()
-    assert [(c.url, c.title) for c in got] == [("https://github.com/ggml-org/llama.cpp/pull/1",
-                                                "llama : add a GPU cache for MoE experts")]
-
-
 # --- два сбора в день ---------------------------------------------------------------------------
 def make_rt(cfg, tmp_path, now, mode="publish") -> Runtime:
     state = State(tmp_path / "s.db")

@@ -48,6 +48,8 @@ gate:
   min_approved_claims: 2
   # «Книга/видео» (решение 49): только то, что реально стоит часа — польза не ниже 4 из 5
   min_usefulness: {book_video: 4}
+  # обсуждения Reddit (решение 64): только «Приём» или «Кейс», сумма от 11 и польза от 4 из 5 — только реально полезное
+  discussion: {rubrics: [trick, case], min_total: 11, min_usefulness: 4}
 
 schedule:
   # в channel.tz: каждые 30 минут с 08:00 до 23:30, ночью канал молчит; в слот — не больше одного поста
@@ -255,12 +257,17 @@ sources:
     repo: cline/cline
     contours: [collect]
   - name: reddit
-    # лучшее за день в r/ClaudeAI и r/LocalLLaMA одним запросом: два запроса подряд Reddit режет (429)
-    type: rss
-    url: https://www.reddit.com/r/ClaudeAI+LocalLLaMA/top/.rss?t=day
+    # Решение 64: лучшее за день из сабреддитов по теме одним запросом (Reddit пускает ~1 запрос в минуту).
+    # Пост со ссылкой на GitHub или Hugging Face — проект; со ссылкой на статью — статья (как в решении 48).
+    # В discussion_subreddits пост со своим текстом от min_body_chars — обсуждение: первоисточник — ветка (пост и
+    # лучшие комментарии), рубрика только «Приём» или «Кейс», пороги строже (gate.discussion в коде).
+    # Картинки и видео без текста, мемы — не берём. Выключить обсуждения: discussion_subreddits: [].
+    type: reddit
+    url: https://www.reddit.com/r/ClaudeAI+ClaudeCode+codex+vibecoding+LocalLLaMA/top/.rss?t=day&limit=75
     contours: [collect]
-    skip_title_regex: ["(?i)\\b(meme|humor|funny|rant)\\b"]
-    aggregator_hosts: [reddit.com, redd.it]  # только посты со ссылкой наружу: GitHub, Hugging Face, статьи
+    discussion_subreddits: [ClaudeAI, ClaudeCode, codex, vibecoding]
+    min_body_chars: 400
+    skip_title_regex: ["(?i)\\b(meme|humor|funny|rant|shitpost|joke)\\b"]
   - name: lobsters-ai
     type: rss
     url: https://lobste.rs/t/ai.rss
@@ -321,6 +328,61 @@ sources:
     media: book
     max_age_days: 180
     include_title_regex: ["\\b(AI|LLMs?|GPT|Claude|Agents?|Agentic|Prompt\\w*|Machine Learning|Copilot|Generative|MCP|DSPy|RAG|Evals?)\\b"]
+  - name: claude-dev
+    # решение 64: блог разработчиков Anthropic о работе с Claude и Claude Code — советы и приёмы; за месяц до
+    # решения вышло 9 статей, а к нам через HN попала одна
+    type: rss
+    url: https://claude.dev/rss.xml
+    whitelist: true
+    official_domains: [claude.dev]
+    contours: [collect]
+  # --- блоги практиков: приёмы и кейсы разработки с ИИ (решение 64) ---
+  - name: geoffrey-huntley
+    type: rss
+    url: https://ghuntley.com/rss/
+    contours: [collect]
+  - name: pragmatic-engineer
+    # часть статей платная: модель видит только открытую часть
+    type: rss
+    url: https://newsletter.pragmaticengineer.com/feed
+    contours: [collect]
+  - name: armin-ronacher
+    type: rss
+    url: https://lucumr.pocoo.org/feed.atom
+    contours: [collect]
+  - name: kent-beck
+    type: rss
+    url: https://tidyfirst.substack.com/feed
+    contours: [collect]
+  - name: addy-osmani
+    type: rss
+    url: https://addyo.substack.com/feed
+    contours: [collect]
+  # --- новости агентов для кода (решение 64) ---
+  - name: amp-news
+    type: rss
+    url: https://ampcode.com/news.rss
+    contours: [collect]
+    max_age_days: 14  # новость Amp выходит почти каждые два дня — месячный архив в очередь не берём
+  - name: opencode-releases
+    type: github_releases
+    repo: anomalyco/opencode
+    contours: [collect]
+  - name: goose-releases
+    type: github_releases
+    repo: aaif-goose/goose
+    contours: [collect]
+  - name: crush-releases
+    type: github_releases
+    repo: charmbracelet/crush
+    contours: [collect]
+  - name: vscode-updates
+    # заметки к выпускам VS Code и блог: новости Copilot и агентов в редакторе; сборки Insiders — не выпуск
+    type: rss
+    url: https://code.visualstudio.com/feed.xml
+    contours: [collect]
+    skip_title_regex: ["(?i)insiders"]
+    max_age_days: 14  # выпуск VS Code — каждую неделю: прошлые выпуски в очередь не берём
   - name: simon-willison
     type: rss
     url: https://simonwillison.net/atom/everything/

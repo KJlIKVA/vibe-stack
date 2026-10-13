@@ -19,7 +19,8 @@ from .steps import _SOURCE_RANK, doc_guards, gate, merge_batch, prefilter, verif
 
 log = logging.getLogger(__name__)
 CONTOUR = "collect"
-FEED_TYPES = ("rss", "sitemap", "github_releases", "md_changelog", "youtube", "jsonld_list", "openlibrary")
+FEED_TYPES = ("rss", "sitemap", "github_releases", "md_changelog", "youtube", "jsonld_list", "openlibrary",
+              "reddit")
 
 
 def run_collect(rt: Runtime) -> dict[str, Any]:
@@ -211,7 +212,8 @@ def process_candidate(rt: Runtime, c: Candidate, rubrics: dict[str, Rubric]) -> 
 
     score: ScoreResult = rt.llm.json("score", prompts.score_prompt(c.for_prompt(), doc.text, rt.today()),
                                        ctx_id=c.id)
-    g = gate(score, rt.cfg, rubrics)
+    discussion = bool(c.extra.get("discussion"))
+    g = gate(score, rt.cfg, rubrics, discussion=discussion)
     # объяснение модели — в лог запуска: по нему видно, почему видео или статья «стоит» или «не стоит» поста
     log.info("оценка %s: %s, %s/15, %s — %s", c.url, score.category, g.total, ",".join(g.reasons) or "прошла",
              score.reason)
@@ -225,7 +227,9 @@ def process_candidate(rt: Runtime, c: Candidate, rubrics: dict[str, Rubric]) -> 
     if not v.passed:
         return _reject(rt, c, "verify", v.reasons, score, g.rubric, g.total, verify_json)
 
-    w = write(rt, c, g.rubric, rubric, v.approved, mode="standard")
+    # обсуждение Reddit — опыт участников, а не документация: пост говорит, чей это опыт (решение 64)
+    w = write(rt, c, g.rubric, rubric, v.approved, mode="standard",
+              notes=prompts.load("discussion_notes") if discussion else None)
     if w.html is None:
         return _reject(rt, c, "lint", ["lint:" + ";".join(w.errors)], score, g.rubric, g.total, verify_json)
 

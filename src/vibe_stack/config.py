@@ -63,6 +63,12 @@ class Limits(BaseModel):
     urgent_per_day: int = 2
 
 
+class DiscussionGate(BaseModel):
+    rubrics: list[str] = Field(default_factory=lambda: ["trick", "case"])
+    min_total: int = 11
+    min_usefulness: int = 4
+
+
 class Gate(BaseModel):
     min_total: int = 10
     min_verifiability: int = 2
@@ -70,6 +76,8 @@ class Gate(BaseModel):
     min_approved_claims: int = 2
     # свой порог полезности (usefulness 0–5) для рубрики: «Книга/видео» — только то, что стоит потраченного часа
     min_usefulness: dict[str, int] = Field(default_factory=dict)
+    # обсуждения Reddit (решение 64): только приём или кейс и только реально полезное — пороги строже обычных
+    discussion: DiscussionGate = Field(default_factory=DiscussionGate)
 
 
 class Schedule(BaseModel):
@@ -164,7 +172,7 @@ class Rubric(BaseModel):
 class SourceConfig(BaseModel):
     name: str
     type: Literal["rss", "github_releases", "github_search", "hackernews", "sitemap", "md_changelog", "youtube",
-                  "jsonld_list", "openlibrary", "fixture"]
+                  "jsonld_list", "openlibrary", "reddit", "fixture"]
     url: str | None = None
     repo: str | None = None
     path_prefix: str | None = None
@@ -181,15 +189,15 @@ class SourceConfig(BaseModel):
     channels: list[str] = Field(default_factory=list)  # youtube: id каналов UC…
     title_prefix: str = ""  # md_changelog: «OpenAI API: » перед текстом записи
     max_age_days: int | None = None  # свой предел свежести вместо gate.max_age_days (changelog: только последние дни)
-    # агрегатор ссылок (Reddit): берём внешнюю ссылку «[link]» из записи; записи без неё (обсуждения, картинки,
-    # видео на этих хостах) пропускаем — их страницы роботам закрыты, а первоисточник — по внешней ссылке
-    aggregator_hosts: list[str] = Field(default_factory=list)
     min_minutes: int = 0  # youtube: короче — не берём (0 — без ограничения: длину оценивает модель, решение 51)
     # что за материал (решение 50): у видео, подкастов и книг свои правила оценки «стоит ли это времени»
     media: Literal["video", "podcast", "book"] | None = None
     # openlibrary: поиск Open Library (новые книги издательства) и адрес страницы книги по ISBN (решение 53)
     query: str = ""
     url_template: str = ""
+    # reddit (решение 64): в этих сабреддитах пост со своим текстом не короче min_body_chars — обсуждение
+    discussion_subreddits: list[str] = Field(default_factory=list)
+    min_body_chars: int = 400
 
 
 class SandboxConfig(BaseModel):

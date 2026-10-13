@@ -3,7 +3,6 @@ from __future__ import annotations
 import calendar
 import re
 from datetime import UTC, datetime
-from urllib.parse import urlsplit
 
 import feedparser
 import httpx
@@ -20,20 +19,6 @@ def _entry_dt(entry: feedparser.FeedParserDict, *names: str) -> datetime | None:
         if t:
             return datetime.fromtimestamp(calendar.timegm(t), tz=UTC)
     return None
-
-
-_LINK_RE = re.compile(r'<a href="([^"]+)">\s*\[link\]\s*</a>')
-
-
-def external_link(summary_html: str, hosts: list[str]) -> str | None:
-    """Внешняя ссылка записи агрегатора («[link]» у Reddit) или None, если она ведёт на сам агрегатор."""
-    m = _LINK_RE.search(summary_html)
-    if not m:
-        return None
-    host = (urlsplit(m.group(1)).hostname or "").lower()
-    if not host or any(host == h or host.endswith("." + h) for h in hosts):
-        return None
-    return m.group(1)
 
 
 class RSSSource:
@@ -58,10 +43,6 @@ class RSSSource:
             if include and not any(p.search(title) for p in include):
                 continue
             summary_html = e.get("summary") or ""
-            if self.cfg.aggregator_hosts:
-                link = external_link(summary_html, self.cfg.aggregator_hosts)
-                if not link:
-                    continue
             _, summary, _ = html_to_text(summary_html) if "<" in summary_html else ("", summary_html, {})
             out.append(Candidate(
                 source=self.name,

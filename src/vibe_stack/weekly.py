@@ -35,6 +35,7 @@ REASON_LABELS = {
     "lint": "текст не прошёл автоматическую проверку",
     "blocked_domain": "домен в блок-листе",
     "rubric_disabled": "рубрика пока выключена",
+    "discussion_not_practical": "обсуждение без приёма или кейса",
     "no_title": "без заголовка",
     "not_released": "ещё не вышло (книга в раннем доступе, pull request)",
 }

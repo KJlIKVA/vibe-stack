@@ -14,6 +14,7 @@ import httpx
 from .config import Fetch, env
 from .htmltext import html_to_text, page_images, published_from_meta
 from .models import FetchedDoc
+from .sources import reddit
 from .sources.md_changelog import entry_id, md_url, parse_entries
 from .sources.youtube import api_get as yt_api_get
 from .sources.youtube import duration_minutes, video_id
@@ -82,6 +83,8 @@ class HttpFetcher:
                 return self._changelog_entry(url)
             if video_id(url):
                 return self._youtube(url)
+            if reddit.thread_ref(url):
+                return self._reddit(url)
             return self._generic(url)
         except (httpx.HTTPError, UnsafeURL, ValueError) as e:
             log.info("fetch failed %s: %s", url, e)
@@ -262,6 +265,16 @@ class HttpFetcher:
                           title=sn.get("title") or "", published_meta=sn.get("publishedAt"),
                           text=truncate(text, self.cfg.max_doc_chars), image=thumb,
                           error=None if sn.get("description") else "у видео нет описания")
+
+    def _reddit(self, url: str) -> FetchedDoc:
+        """Ветка Reddit — через её RSS: страницы и JSON Reddit роботам закрыты (решение 64)."""
+        title, text, posted = reddit.thread_doc(self.client, url)
+        now = self.clock()
+        if not text:
+            return FetchedDoc(url=url, final_url=url, ok=False, http_status=404, fetched_at=now,
+                              error="ветка не найдена")
+        return FetchedDoc(url=url, final_url=url, ok=True, http_status=200, fetched_at=now, title=title,
+                          published_meta=posted, text=truncate(text, self.cfg.max_doc_chars))
 
 
 class FixtureFetcher:
