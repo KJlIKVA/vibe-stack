@@ -121,21 +121,42 @@ def _cap(s: str) -> str:
     return s[:1].upper() + s[1:]
 
 
-def _split_long(line: str) -> str:
-    """Абзац длиннее MAX_SENTENCES предложений — на абзацы поровну, теги не разрываем."""
-    if _OWN_LINE.match(line):
-        return line
-    parts = _SENTENCE_BREAK.split(line)
-    if len(parts) <= MAX_SENTENCES or not all(_balanced(p) for p in parts):
-        return line
-    n = -(-len(parts) // MAX_SENTENCES)
-    size = -(-len(parts) // n)
-    return "\n\n".join(" ".join(parts[i:i + size]) for i in range(0, len(parts), size))
+def _is_prose(block: str) -> bool:
+    """Абзац обычного текста в одну строку: не подзаголовок, не список, не ссылка, не «Кому подойдёт: …»."""
+    return "\n" not in block and bool(block.strip()) and not _OWN_LINE.match(block) \
+        and not _PLAIN_LABEL.match(block)
+
+
+def _sentences(block: str) -> list[str] | None:
+    parts = _SENTENCE_BREAK.split(block)
+    return parts if all(_balanced(p) for p in parts) else None  # тег через границу предложений — не режем
+
+
+def _even(items: list[str]) -> list[str]:
+    """Предложения — в абзацы не длиннее MAX_SENTENCES, поровну: 7 → 3 + 2 + 2."""
+    k = -(-len(items) // MAX_SENTENCES)
+    base, extra = divmod(len(items), k)
+    out, i = [], 0
+    for n in range(k):
+        size = base + (1 if n < extra else 0)
+        out.append(" ".join(items[i:i + size]))
+        i += size
+    return out
+
+
+def _regroup(run: list[str]) -> list[str]:
+    """Подряд идущие абзацы текста. Если большинство из них — одно предложение (модель ставила пустую строку после
+    каждого предложения), собираем их в абзацы по 2–3 предложения; длинный абзац делим поровну."""
+    split = [_sentences(b) for b in run]
+    if len(run) >= 2 and all(split) and 2 * sum(len(p) == 1 for p in split if p) >= len(run):
+        return _even([s for p in split if p for s in p])
+    return [b if not p or len(p) <= MAX_SENTENCES else "\n\n".join(_even(p)) for b, p in zip(run, split, strict=True)]
 
 
 def paragraphs(body: str) -> str:
-    """Решение 66: текст абзацами. Модель ставила каждое предложение на свою строку без пустых строк — пост читался
-    как стена строк. Строки одной мысли склеиваются подряд, абзац длиннее трёх предложений делится, подписи
+    """Решение 66: текст абзацами. Модель ставила каждое предложение на свою строку (или в свой абзац) — пост читался
+    как стена строк. Строки одной мысли склеиваются подряд, абзацы из одного предложения собираются по 2–3,
+    абзац длиннее трёх предложений делится, подписи
     разбора: без «О чём статья», а «Что здесь любопытно или спорно» и «Что с этим делать читателю» — отдельной
     строкой, после неё пустая строка. Длинные тире — обычным дефисом. Применяется и к постам в очереди: подвал
     пересобирается при отправке."""
@@ -156,9 +177,19 @@ def paragraphs(body: str) -> str:
             lines[-1] = f"{prev} {line.strip()}"  # продолжение той же мысли — в ту же строку
         else:
             lines.append(line)
-    text = "\n".join(_split_long(ln) for ln in lines).strip("\n")
+    blocks = [b.strip("\n") for b in re.split(r"\n\s*\n", "\n".join(lines).strip("\n")) if b.strip()]
+    out: list[str] = []
+    run: list[str] = []
+    for block in [*blocks, ""]:  # пустой блок в конце закрывает последнюю серию
+        if _is_prose(block):
+            run.append(block)
+            continue
+        out += _regroup(run) if run else []
+        run = []
+        if block:
+            out.append(block)
     # длинное и среднее тире — обычным дефисом (ваше решение): «API — способ…» → «API - способ…», «1–3» → «1-3»
-    return re.sub(r"\n{3,}", "\n\n", text).replace("—", "-").replace("–", "-")
+    return "\n\n".join(out).replace("—", "-").replace("–", "-")
 
 
 def apply(post_html: str, *, source_url: str, rubric: Rubric, template: str = "") -> str:
