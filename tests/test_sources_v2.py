@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -218,6 +219,21 @@ def test_morning_and_afternoon_collects(cfg, tmp_path) -> None:
     assert "glossary" not in s  # «Слово дня» отменено (решение 56)
 
 
+@pytest.mark.parametrize(("cron_utc", "half", "day"), [
+    (datetime(2026, 10, 15, 22, 0, tzinfo=UTC), "am", "2026-10-16"),   # 07:00 по Японии — уже следующий день
+    (datetime(2026, 10, 15, 23, 30, tzinfo=UTC), "am", "2026-10-16"),  # запасной утренний, 08:30
+    (datetime(2026, 10, 16, 5, 0, tzinfo=UTC), "pm", "2026-10-16"),    # 14:00
+    (datetime(2026, 10, 16, 6, 30, tzinfo=UTC), "pm", "2026-10-16"),   # запасной дневной, 15:30
+])
+def test_collect_crons_in_japan_time(cfg, tmp_path, cron_utc, half, day) -> None:
+    """cron в collect.yml (UTC) с часовым поясом канала дают нужный сбор и день (решение 67)."""
+    cfg.channel.tz = "Asia/Tokyo"
+    rt = make_rt(cfg, tmp_path, cron_utc)
+    assert collect.collect_half(rt) == half and rt.today().isoformat() == day
+    crons = [c["cron"] for c in wf("collect.yml")[True]["schedule"]]
+    assert f"{cron_utc.minute} {cron_utc.hour} * * *" in crons
+
+
 def test_daily_max_per_rubric(cfg, now) -> None:
     cfg.planner.daily_max = {"book_video": 1}
     hist = [published("Talk A", "book_video", "https://a.dev/1", now - timedelta(hours=2))]
@@ -328,12 +344,17 @@ def wf(name: str) -> dict:
 def test_workflows_wiring() -> None:
     collect_wf = wf("collect.yml")
     crons = [c["cron"] for c in collect_wf[True]["schedule"]]
-    assert "0 11 * * *" in crons and "0 4 * * *" in crons  # 14:00 и 07:00 МСК
+    assert "0 22 * * *" in crons and "0 5 * * *" in crons  # 07:00 и 14:00 по Японии (решение 67)
     # песочница запускается по имени workflow сбора — имена должны совпадать
     assert wf("sandbox.yml")[True]["workflow_run"]["workflows"] == [collect_wf["name"]]
     weekly = wf("weekly.yml")
-    assert "watchlist" in weekly["jobs"]["run"]["with"]["commands"]
-    assert "0 9 * * 0" in [c["cron"] for c in weekly[True]["schedule"]]
+    commands = weekly["jobs"]["run"]["with"]["commands"]
+    assert "watchlist" in commands
+    weekly_crons = [c["cron"] for c in weekly[True]["schedule"]]
+    assert "0 3 * * 0" in weekly_crons  # вс 12:00 по Японии
+    # подборку от итогов отличает строка cron в commands — она должна быть в расписании
+    refs = re.findall(r"github\.event\.schedule == '([^']+)'", commands)
+    assert len(refs) == 2 and set(refs) <= set(weekly_crons)
     run = json.dumps(wf("_run.yml"))
     assert "watchlist)" in run and "YOUTUBE_API_KEY" in run
 

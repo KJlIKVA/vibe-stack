@@ -4,7 +4,7 @@
 
 channel:
   name: Vibe Stack
-  tz: Europe/Moscow
+  tz: Asia/Tokyo  # решение 67: канал работает по японскому времени (до 15.10 — Europe/Moscow)
   # @username канала без «@» — нужен для ссылок на посты в «Итогах недели».
   # Пусто — ссылки строятся по TELEGRAM_CHANNEL_ID (вид t.me/c/...).
   username: "vibestack_off"
@@ -170,7 +170,7 @@ sandbox:
   # репозитория; true — только provenance (строже: без пометки останется больше половины пакетов)
   require_provenance: false
 
-# Сводка дня админу в личку (время — cron в .github/workflows/digest.yml, 23:45 МСК)
+# Сводка дня админу в личку (время — cron в .github/workflows/digest.yml, 23:45 по Японии)
 digest:
   enabled: true
 

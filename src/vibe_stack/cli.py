@@ -209,7 +209,7 @@ def run_eval(args: argparse.Namespace, cfg: Config) -> int:
 
     out_root = Path(args.out) / f"eval-{utc_now().strftime('%Y%m%d-%H%M%S')}"
     setup_logging(out_root, args.verbose)
-    # фиксированное «сейчас»: среда, 10:30 по Москве — внутри слота 10:00
+    # фиксированное «сейчас»: среда, 16:30 по Японии — внутри слота 16:30
     now = parse_dt("2026-10-07T07:30:00Z")
     assert now is not None
     fixtures = load_fixtures(args.fixtures, now, args.phase)

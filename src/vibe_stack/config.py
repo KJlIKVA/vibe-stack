@@ -54,7 +54,7 @@ class LLMConfig(BaseModel):
 
 class ChannelConfig(BaseModel):
     name: str = "Vibe Stack"
-    tz: str = "Europe/Moscow"
+    tz: str = "Asia/Tokyo"
     username: str = ""
 
 

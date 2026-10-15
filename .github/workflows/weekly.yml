@@ -1,12 +1,13 @@
-name: Итоги недели (вс 19:00) и подборка «Что посмотреть» (вс 12:00 МСК)
+name: Итоги недели (вс 19:00) и подборка «Что посмотреть» (вс 12:00 по Японии)
 
 on:
   # второй запуск — страховка; повторно за неделю итоги не выйдут
   schedule:
-    - cron: "0 16 * * 0"   # итоги недели (19:00 МСК)
-    - cron: "30 17 * * 0"  # запасной (20:30)
-    - cron: "0 9 * * 0"    # подборка «Что посмотреть и послушать» (12:00 МСК)
-    - cron: "30 10 * * 0"  # запасной (13:30)
+    # cron — в UTC; японское время = UTC + 9, воскресенье и там и там (решение 67)
+    - cron: "0 10 * * 0"   # итоги недели (19:00 по Японии)
+    - cron: "30 11 * * 0"  # запасной (20:30)
+    - cron: "0 3 * * 0"    # подборка «Что посмотреть и послушать» (12:00 по Японии)
+    - cron: "30 4 * * 0"   # запасной (13:30)
   workflow_dispatch:
     inputs:
       mode:
@@ -38,7 +39,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || vars.VIBE_STACK_ENABLED == 'true'
     uses: ./.github/workflows/_run.yml
     with:
-      commands: ${{ github.event_name == 'workflow_dispatch' && inputs.contour || ((github.event.schedule == '0 9 * * 0' || github.event.schedule == '30 10 * * 0') && 'watchlist' || 'weekly') }}
+      commands: ${{ github.event_name == 'workflow_dispatch' && inputs.contour || ((github.event.schedule == '0 3 * * 0' || github.event.schedule == '30 4 * * 0') && 'watchlist' || 'weekly') }}
       mode: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'publish' }}
       force: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
     secrets: inherit

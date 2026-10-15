@@ -15,7 +15,10 @@ NOW = datetime(2026, 10, 7, 7, 30, tzinfo=UTC)
 
 @pytest.fixture
 def cfg() -> Config:
-    return load_config(ROOT / "config.yaml")
+    cfg = load_config(ROOT / "config.yaml")
+    # сценарии тестов написаны по московскому времени; канал с 15.10 работает по японскому (решение 67)
+    cfg.channel.tz = "Europe/Moscow"
+    return cfg
 
 
 @pytest.fixture
