@@ -39,6 +39,7 @@ def is_official(c: Candidate) -> bool:
     return c.whitelist and any(same_site(c.domain, d) for d in c.official_domains)
 
 
+TRIAGE_IGNORED_STOPS = ("outdated",)
 _MODEL_NOISE = {"claude", "anthropic", "openai", "google", "deepmind", "model", "the", "new"}
 MODEL_MEMORY_DAYS = 30
 
@@ -212,9 +213,13 @@ def _process(rt: Runtime, c: Candidate, rubric: Rubric) -> str:
         rt.state.mark_seen(c.keys, c.id, "rejected", now)
         return "rejected"
 
-    tri: TriageResult = rt.llm.json("triage", prompts.triage_prompt(c.for_prompt(), doc.text), ctx_id=c.id)
-    if tri.hard_stops or tri.event not in rt.cfg.urgent.events:
-        reasons = list(tri.hard_stops) or [f"event:{tri.event}"]
+    tri: TriageResult = rt.llm.json("triage", prompts.triage_prompt(c.for_prompt(), doc.text, rt.today()),
+                                    ctx_id=c.id)
+    # свежесть уже проверил код (окно max_item_age_hours): «устарело» от модели не в счёт — 15.10 так потерялся
+    # выпуск claude-code, вышедший за 25 минут до тика (решение 69)
+    stops = [s for s in tri.hard_stops if s not in TRIAGE_IGNORED_STOPS]
+    if stops or tri.event not in rt.cfg.urgent.events:
+        reasons = stops or [f"event:{tri.event}"]
         rt.decision(CONTOUR, c, "triage", "not_urgent", reasons)
         rt.state.mark_seen(_ukeys(c), c.id, "not_urgent", now)
         return "not_urgent"

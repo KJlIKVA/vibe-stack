@@ -107,12 +107,14 @@ def footer_template(rubric_key: str, overlay: str) -> str:
     return load(OVERLAY_FILES[overlay]) + "\n" + (rubric_notes(rubric_key) or "")
 
 
-def triage_prompt(candidate: dict[str, Any], source_document: str) -> str:
-    # решения владельца о новой модели (решение 65) — отдельным блоком после текста ТЗ
+def triage_prompt(candidate: dict[str, Any], source_document: str, today: date | None = None) -> str:
+    # решения владельца — отдельным блоком после текста ТЗ: новая модель (решение 65), сегодняшняя дата и крупный
+    # релиз — только с заметной новинкой (решение 69)
+    notes = load("triage_notes").replace("{{сегодня}}", human_date(today) if today else "сегодняшнее число")
     return render(load("triage_U"), {
         "candidate_json": json.dumps(candidate, ensure_ascii=False),
         "первоисточник, обрезанный": source_document,
-    }).rstrip("\n") + "\n\n" + load("triage_notes")
+    }).rstrip("\n") + "\n\n" + notes
 
 
 def verify_prompt(claims: list[str], source_document: str, meta: dict[str, Any]) -> str:

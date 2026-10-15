@@ -1,6 +1,7 @@
 """План дня (решение владельца канала, 2026-10-07): бот сам ставит каждому одобренному посту время.
 
-- Сразу после сбора посты расставляются равномерно по свободным слотам до конца дня. Сетка —
+- Сразу после сбора посты расставляются равномерно по свободным слотам до конца дня, а официальные выпуски
+  (решение 63) — в ближайшие свободные слоты (решение 69). Сетка —
   schedule.publish_slots (сейчас каждые 30 минут 08:00–23:30). Учитываются дневной лимит и правила
   планировщика из раздела 4: домены, темы, недельные квоты. Одна рубрика подряд допускается, только если
   других постов нет.
@@ -66,6 +67,15 @@ def spread(free: list[datetime], k: int) -> list[datetime]:
     return [free[round(i * (len(free) - 1) / (k - 1))] for i in range(k)]
 
 
+def assign_slots(order: list[PostRecord], free: list[datetime], official: Official) -> list[datetime]:
+    """Время по порядку order: официальные выпуски — в ближайшие свободные слоты (решение 69: выпуск claude-code
+    третьим в плане уезжал на 22:30), остальные — равномерно по оставшимся слотам дня."""
+    first = [p for p in order if p.source_url and official(p.source_url)]
+    early = iter(free[:len(first)])
+    rest = iter(spread(free[len(first):], len(order) - len(first)))
+    return [next(early) if p in first else next(rest) for p in order]
+
+
 def plan(rt: Runtime, queue: list[PostRecord], *, limit: int, sent_today: int,
          published_times: list[datetime]) -> list[tuple[PostRecord, datetime]]:
     """Ставит время постам очереди, у которых его нет (или оно безнадёжно прошло). Пишет время в Notion.
@@ -118,7 +128,7 @@ def plan(rt: Runtime, queue: list[PostRecord], *, limit: int, sent_today: int,
                     rt.board.update_post(p.ref, planned_at=None)
                 except BoardUnavailable as e:
                     log.warning("план дня: не снять старое время у «%s»: %s", p.title[:60], e)
-    times = spread(free, len(order))
+    times = assign_slots(order, free, official)
     out = []
     for p, t in zip(order, times, strict=True):
         try:

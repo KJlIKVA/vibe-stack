@@ -138,3 +138,17 @@ def test_overdue_post_without_new_slot_does_not_go_out(cfg, tmp_path) -> None:
     assert run_publish(rt)["published"] == 1  # второй — та же тема, места в плане ему нет
     left = [r for r in (a, b) if rt.board.get(r).status == Status.APPROVED]
     assert len(left) == 1 and rt.board.get(left[0]).planned_at is None
+
+
+def test_official_releases_take_the_nearest_slots(cfg, tmp_path) -> None:
+    """Решение 69: официальный выпуск не уезжает в конец дня, даже если в плане он не первый. 15.10 выпуск
+    claude-code шёл третьим после «Разбора» по недельной квоте и поста GitHub и получил последний слот, 22:30."""
+    rt = make_rt(cfg, tmp_path, MORNING)
+    essay = add(rt, "Why Shopify dropped React Native", "analysis", "https://shopify.engineering/rn")
+    tool = add(rt, "Tool A", "tool", "https://a.dev/x")
+    gh = add(rt, "GitHub Actions workflow lockfiles", "tool", "https://github.blog/changelog/2026-10-07-lockfiles")
+    cc = add(rt, "anthropics/claude-code v2.1.300", "tool",
+             "https://github.com/anthropics/claude-code/releases/tag/v2.1.300")
+    assert plan_and_report(rt)["planned"] == 4
+    assert {hhmm(rt.board.get(r).planned_at) for r in (gh, cc)} == {"08:00", "08:30"}
+    assert sorted(hhmm(rt.board.get(r).planned_at) for r in (essay, tool)) == ["09:00", "23:30"]

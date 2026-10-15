@@ -44,6 +44,8 @@ def _int_enum(top: int) -> dict[str, Any]:
 _STR = {"type": "string"}
 _STR_LIST = {"type": "array", "items": _STR}
 _HARD_STOPS = {"type": "array", "items": {"type": "string", "enum": list(HARD_STOPS)}}
+# в триаже свежесть проверяет код, «устарело» модель не ставит (решение 69)
+_TRIAGE_STOPS = {"type": "array", "items": {"type": "string", "enum": [s for s in HARD_STOPS if s != "outdated"]}}
 
 SCHEMAS: dict[str, dict[str, Any]] = {
     "score": _obj({
@@ -72,7 +74,7 @@ SCHEMAS: dict[str, dict[str, Any]] = {
         "id": _STR,
         "event": {"type": "string", "enum": [
             "new_model", "major_release", "pricing_or_limits_change", "vulnerability", "none"]},
-        "hard_stops": _HARD_STOPS,
+        "hard_stops": _TRIAGE_STOPS,
         "reason": _STR,
         "claims": _STR_LIST,
         "model": _STR,

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import copy
-from datetime import timedelta
+from datetime import date, timedelta
 
+from vibe_stack import prompts
 from vibe_stack.board import BoardUnavailable, LocalBoard, RubricOverride
 from vibe_stack.fetch import FixtureFetcher
 from vibe_stack.fixtures import load_fixtures, run_scenario
-from vibe_stack.llm import FakeLLM
+from vibe_stack.llm import SCHEMAS, FakeLLM
 from vibe_stack.models import Status
 from vibe_stack.runtime import Runtime
 from vibe_stack.storage import State
@@ -103,3 +104,18 @@ def test_new_model_post_gets_price_notes_longer_limit_and_chart(cfg, tmp_path) -
     state = State(tmp_path / "state.db")
     assert state.get(f"image:{cid}") == "https://openai.com/evals.png"
     assert res.sent[0][1].rstrip().endswith("#срочно")
+
+
+def test_model_outdated_does_not_stop_fresh_news(cfg, tmp_path) -> None:
+    """Решение 69: свежесть проверяет код. 15.10 модель назвала «устаревшим» выпуск claude-code, вышедший за
+    25 минут до тика, и он не стал срочным."""
+    fx = variant()
+    triage = next(k for k in fx.llm if k[0] == "triage")
+    fx.llm[triage] = {**fx.llm[triage], "hard_stops": ["outdated"]}
+    assert len(run_scenario(fx, cfg, NOW, workdir=tmp_path).sent) == 1
+
+
+def test_triage_knows_today_and_what_a_major_release_is() -> None:
+    p = prompts.triage_prompt({"id": "x"}, "doc", date(2026, 10, 15))
+    assert "Сегодня 15 октября 2026 года." in p and "заметной новинкой" in p
+    assert "outdated" not in SCHEMAS["triage"]["properties"]["hard_stops"]["items"]["enum"]
