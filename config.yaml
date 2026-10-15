@@ -33,7 +33,7 @@ llm:
     score:   {model: gpt-5.6-terra, effort: low,    max_output_tokens: 6000}    # промпт A
     verify:  {model: gpt-5.6-terra, effort: medium, max_output_tokens: 12000}   # промпт B
     write:   {model: gpt-5.6-terra, effort: medium, max_output_tokens: 8000}    # промпт C
-    triage:  {model: gpt-5.6-terra, effort: low,    max_output_tokens: 6000}    # промпт U (срочное)
+    triage:  {model: gpt-5.6-terra, effort: medium, max_output_tokens: 6000}    # промпт U (срочное); medium — решение 69
     weekly:  {model: gpt-5.6-terra, effort: medium, max_output_tokens: 8000}    # промпт D
     image:   {model: gpt-5.6-terra, effort: low,    max_output_tokens: 3000}    # промпт I (картинка к посту о модели)
 

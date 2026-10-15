@@ -118,4 +118,5 @@ def test_model_outdated_does_not_stop_fresh_news(cfg, tmp_path) -> None:
 def test_triage_knows_today_and_what_a_major_release_is() -> None:
     p = prompts.triage_prompt({"id": "x"}, "doc", date(2026, 10, 15))
     assert "Сегодня 15 октября 2026 года." in p and "заметной новинкой" in p
+    assert "Claude Tag" in p  # новинки соседних продуктов из тех же заметок выпуск срочным не делают
     assert "outdated" not in SCHEMAS["triage"]["properties"]["hard_stops"]["items"]["enum"]
