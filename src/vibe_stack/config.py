@@ -69,6 +69,12 @@ class DiscussionGate(BaseModel):
     min_usefulness: int = 4
 
 
+class WatchGate(BaseModel):
+    min_total: int = 13
+    min_usefulness: int = 4
+    min_audience_fit: int = 2
+
+
 class Gate(BaseModel):
     min_total: int = 10
     min_verifiability: int = 2
@@ -78,6 +84,8 @@ class Gate(BaseModel):
     min_usefulness: dict[str, int] = Field(default_factory=dict)
     # обсуждения Reddit (решение 64): только приём или кейс и только реально полезное — пороги строже обычных
     discussion: DiscussionGate = Field(default_factory=DiscussionGate)
+    # видео и подкасты (решение 68): строже остальных «Книг/видео» — докладов много, в канал только лучшее
+    watch: WatchGate = Field(default_factory=WatchGate)
 
 
 class Schedule(BaseModel):

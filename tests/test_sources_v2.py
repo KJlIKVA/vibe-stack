@@ -177,6 +177,27 @@ def test_book_video_needs_high_usefulness(cfg) -> None:
     assert gate(score("tool", 3), cfg, rubrics).passed  # у других рубрик порог прежний
 
 
+def test_watch_gate_stricter_for_videos_and_podcasts(cfg) -> None:
+    """Видео и подкасты (решение 68): сумма от 13 и audience_fit 2; у книг пороги прежние."""
+    from vibe_stack.models import ScoreResult
+    from vibe_stack.steps import gate
+
+    def score(category: str = "book_video", *, verifiability: int = 2, audience_fit: int = 2) -> ScoreResult:
+        return ScoreResult.model_validate({"id": "x", "category": category, "scores": {
+            "novelty": 3, "usefulness": 4, "verifiability": verifiability, "substance": 2,
+            "audience_fit": audience_fit}})
+
+    rubrics = {k: v.model_copy(update={"enabled": True}) for k, v in cfg.rubrics.items()}
+    # типичный доклад AI Engineer до решения 68: 3 + 4 + 2 + 2 + 1 = 12 — раньше проходил
+    typical = score(audience_fit=1)
+    for media in ("video", "podcast", None):
+        assert gate(typical, cfg, rubrics, media=media).reasons == ["low_score", "low_audience_fit"]
+    assert gate(typical, cfg, rubrics, media="book").passed  # книги — по общим порогам
+    assert gate(score(), cfg, rubrics, media="video").passed  # по теме и понятно вайбкодеру: 13 из 15
+    assert gate(score(verifiability=3, audience_fit=1), cfg, rubrics, media="video").reasons == ["low_audience_fit"]
+    assert gate(score("tool", audience_fit=1), cfg, rubrics, media="video").passed  # у других рубрик всё прежнее
+
+
 def test_duration_and_video_id() -> None:
     assert youtube.duration_minutes("PT45M") == 45 and youtube.duration_minutes("PT1H0M31S") == 61
     assert youtube.video_id("https://youtu.be/abcdefghijk") == "abcdefghijk"
