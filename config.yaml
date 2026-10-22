@@ -252,7 +252,7 @@ sources:
     official_domains: [deepmind.google, blog.google]
     contours: [collect, urgent]
   # решение 70: другие компании — разработчики моделей. Mistral Large 4 и DeepSeek V4.1 до нас дошли только через
-  # Hugging Face и Reddit, а xAI не было совсем
+  # Hugging Face и Reddit
   - name: mistral-news
     type: rss
     url: https://mistral.ai/rss.xml
@@ -269,14 +269,7 @@ sources:
     model_vendor: true
     official_domains: [deepseek.com]
     contours: [collect, urgent]
-  - name: xai-news
-    type: sitemap
-    url: https://x.ai/sitemap.xml
-    path_prefix: /news/
-    whitelist: true
-    model_vendor: true
-    official_domains: [x.ai]
-    contours: [collect, urgent]
+  # xAI (x.ai) не подключён: sitemap и страницы отвечают роботам из GitHub Actions 403
   - name: meta-ai-research
     # решение 70: модели Meta (Muse Spark Open, Muse Wonder) — у блога нет RSS и дат в sitemap: новые ссылки со
     # страницы блога, дата — первое появление
