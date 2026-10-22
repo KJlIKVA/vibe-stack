@@ -230,7 +230,9 @@ sources:
     type: sitemap
     url: https://claude.com/sitemap.xml
     path_prefix: /resources/articles/
-    first_poll_new: ["https://claude.com/resources/articles/claude-duet"]
+    first_poll_new: ["https://claude.com/resources/articles/claude-duet",
+                     "https://claude.com/resources/articles/claude-security-now-scans-continuously-and-tracks-fixes",
+                     "https://claude.com/resources/articles/code-review-is-now-generally-available"]
     whitelist: true
     model_vendor: true
     official_domains: [claude.com]
@@ -249,9 +251,46 @@ sources:
     model_vendor: true
     official_domains: [deepmind.google, blog.google]
     contours: [collect, urgent]
+  # решение 70: другие компании — разработчики моделей. Mistral Large 4 и DeepSeek V4.1 до нас дошли только через
+  # Hugging Face и Reddit, а xAI не было совсем
+  - name: mistral-news
+    type: rss
+    url: https://mistral.ai/rss.xml
+    whitelist: true
+    model_vendor: true
+    official_domains: [mistral.ai]
+    contours: [collect, urgent]
+  - name: deepseek-news
+    # новости API DeepSeek (выход моделей, цены); в sitemap нет дат — новая страница = новый адрес
+    type: sitemap
+    url: https://api-docs.deepseek.com/sitemap.xml
+    path_prefix: /news/
+    whitelist: true
+    model_vendor: true
+    official_domains: [deepseek.com]
+    contours: [collect, urgent]
+  - name: xai-news
+    type: sitemap
+    url: https://x.ai/sitemap.xml
+    path_prefix: /news/
+    whitelist: true
+    model_vendor: true
+    official_domains: [x.ai]
+    contours: [collect, urgent]
+  - name: meta-ai-research
+    # решение 70: модели Meta (Muse Spark Open, Muse Wonder) — у блога нет RSS и дат в sitemap: новые ссылки со
+    # страницы блога, дата — первое появление
+    type: page_links
+    url: https://research.meta.ai/blog
+    path_prefix: /blog/
+    whitelist: true
+    model_vendor: true
+    official_domains: [research.meta.ai]
+    contours: [collect, urgent]
   - name: github-changelog
     type: rss
     url: https://github.blog/changelog/feed/
+    pages: 3  # решение 70: в ленте 10 записей, за полдня выходит больше — Copilot computer use (01.10) мы не увидели
     # решение 70: только про Copilot и ИИ — Dependabot, раннеры, правила веток и токены вайбкодеру неинтересны
     include_text_regex: ["copilot|\\bagents?\\b|agentic|\\bAI\\b|\\bMCP\\b|\\bLLMs?\\b|\\bmodels?\\b|codex|claude|gemini|spark"]
     whitelist: true
@@ -418,6 +457,20 @@ sources:
     type: github_releases
     repo: charmbracelet/crush
     contours: [collect]
+  - name: cerebral-valley-hackathons
+    # решение 70: хакатоны Anthropic, OpenAI, Google и других — на Cerebral Valley («Built with Claude: Japan»);
+    # официальных анонсов на сайтах компаний нет. Из тысяч событий — только с именем компании в адресе
+    type: sitemap
+    url: https://cerebralvalley.ai/sitemap.xml
+    path_prefix: /e/
+    include_text_regex: ["^/e/[^/]*(claude|anthropic|openai|codex|chatgpt|gemini|google|deepmind|cursor|copilot|github|mistral|meta|xai|grok)[^/]*$"]
+    contours: [collect]
+  - name: android-developers
+    # решение 70: Gemini в Android Studio, приложения, собранные в AI Studio, — только записи про ИИ
+    type: rss
+    url: https://android-developers.googleblog.com/feeds/posts/default
+    include_text_regex: ["gemini|\\bagents?\\b|agentic|\\bAI\\b|vibe|\\bMCP\\b|\\bLLMs?\\b"]
+    contours: [collect]
   - name: jetbrains-ai
     # решение 70: блог JetBrains об ИИ — агент Air, модели Mellum, ИИ в IDE; выходит раз в неделю-две
     type: rss
@@ -466,3 +519,13 @@ sources:
     min_points: 100  # решение 70: Show HN на 60 очков — чаще всего проходные проекты
     per_query: 15
     queries: ["Claude Code", "Codex", "MCP server", "AI agent", "vibe coding", "LLM coding"]
+  - name: hackernews-top
+    # решение 70: главная HN без поисковых слов — всё про ИИ от 200 очков. По словам выше не находились Mistral
+    # Large 4, DeepSeek V4.1 Flash, DeepInfer (2315 очков), Claude Duet. HN — только способ найти: в пост идёт
+    # ссылка на первоисточник
+    type: hackernews
+    contours: [collect]
+    min_points: 200
+    per_query: 100
+    queries: [""]
+    include_text_regex: ["\\b(AI|LLMs?|GPT|Claude|Anthropic|OpenAI|Gemini|Gemma|Codex|Copilot|Cursor|agents?|agentic|MCP|DeepSeek|Qwen|Kimi|Mistral|Llama|vibe|prompts?|models?)\\b"]

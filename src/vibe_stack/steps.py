@@ -25,7 +25,7 @@ from .timeutil import iso, parse_dt
 log = logging.getLogger(__name__)
 
 # порядок предпочтения ссылки, когда одна новость пришла из нескольких источников
-_SOURCE_RANK = {"rss": 0, "sitemap": 0, "github_releases": 0, "github_search": 1, "github_trending": 1,
+_SOURCE_RANK = {"rss": 0, "sitemap": 0, "page_links": 0, "github_releases": 0, "github_search": 1, "github_trending": 1,
                 "hackernews": 2}
 # сигналы популярности для оценки интереса (решение 70): из склеенных кандидатов берём наибольший
 _POPULARITY = ("stars", "stars_per_day", "stars_recent", "points")
@@ -84,22 +84,24 @@ _SITE_SUFFIX = re.compile(r"\s+[\\|—–-]\s+[^\\|—–-]{1,30}$")
 
 def with_page_title(c: Candidate, doc: FetchedDoc) -> Candidate:
     """У sitemap вместо заголовка только slug — берём заголовок со страницы (без « \\ Сайт»)."""
-    if c.source_type != "sitemap" or not doc.title.strip():
+    if c.source_type not in ("sitemap", "page_links") or not doc.title.strip():
         return c
     return c.model_copy(update={"title": _SITE_SUFFIX.sub("", doc.title.strip())})
 
 
 def doc_guards(doc: FetchedDoc, cfg: Config, now: datetime | None = None, max_age_days: int | None = None,
-               book: bool = False) -> list[str]:
+               book: bool = False, feed_date: datetime | None = None) -> list[str]:
     """Проверки кодом по загруженному первоисточнику (now — проверять и даты документа; max_age_days —
-    свой предел источника, например у книг; book — кандидат из источника книг)."""
+    свой предел источника, например у книг; book — кандидат из источника книг; feed_date — дата публикации в
+    официальной ленте самого издателя: она тоже в счёт, решение 70)."""
     reasons = []
     if cfg.collect.code_injection_guard and find_injection(doc.text):
         reasons.append("injection_detected")
     if only_unsafe_install(doc.text):
         reasons.append("unsafe_install")
     if now is not None:
-        dates = [d for d in (parse_dt(doc.published_meta), parse_dt(doc.updated_meta)) if d]
+        # у страницы OpenAI о Google Cloud (21.10) в метаданных стояло 10 июня — пост отклонили как старый
+        dates = [d for d in (parse_dt(doc.published_meta), parse_dt(doc.updated_meta), feed_date) if d]
         if dates and now - max(dates) > timedelta(days=max_age_days or cfg.gate.max_age_days):
             reasons.append("outdated")  # по датам самого источника: старый проект, всплывший на HN
     if book and unreleased_book(doc.text):

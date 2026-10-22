@@ -227,3 +227,149 @@ def test_include_text_regex_looks_at_description(cfg) -> None:
     s = next(s for s in cfg.sources if s.name == "github-changelog")
     got = RSSSource(s, client({s.url: FEED})).collect()
     assert [c.title for c in got] == ["HydraFusion updates"]  # Copilot — только в описании
+
+
+# --- openai.com: свежая новость без копии в архиве ---------------------------------------------------------------
+def test_archive_is_asked_to_save_a_fresh_page(cfg, now) -> None:
+    """Копии ещё нет (404) — просим архив снять страницу и берём копию; без копии и без сохранения — отказ."""
+    url = "https://openai.com/index/openai-models-google-cloud"
+    page = ("<html><head><title>Google Cloud</title></head><body><article>" + "OpenAI models on Vertex. " * 40
+            + "</article></body></html>")
+    saved: list[str] = []
+    archive = f"https://web.archive.org/web/2id_/{url}"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        u = str(req.url)
+        if u == url:
+            return httpx.Response(403)
+        if u.startswith("https://web.archive.org/save/"):
+            saved.append(u)
+            return httpx.Response(302, headers={"location": "https://web.archive.org/web/2026/" + url})
+        if u == archive:
+            return httpx.Response(200, text=page, headers={"content-type": "text/html"}) if saved \
+                else httpx.Response(404)
+        return httpx.Response(404)
+
+    cfg.fetch.archive_fallback_hosts = ["openai.com"]
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    doc = HttpFetcher(cfg.fetch, lambda: now, http, check_urls=False).fetch(url, purpose="score")
+    assert doc.ok and "OpenAI models on Vertex" in doc.text and saved == [f"https://web.archive.org/save/{url}"]
+    saved.clear()
+    cfg.fetch.archive_save = False
+    assert not HttpFetcher(cfg.fetch, lambda: now, http, check_urls=False).fetch(url, purpose="score").ok
+
+
+def test_official_feed_date_counts_for_freshness(cfg, now) -> None:
+    """В метаданных страницы OpenAI стояло 10 июня, в RSS и на странице — 21 октября: пост не старый. Дата находки
+    на HN или Reddit так не работает: старый проект, всплывший на HN, остаётся старым."""
+    from vibe_stack.models import FetchedDoc
+    from vibe_stack.steps import doc_guards
+
+    doc = FetchedDoc(url="https://openai.com/x", final_url="https://openai.com/x", ok=True, fetched_at=now,
+                     published_meta="2026-06-10T20:00:00Z", text="text")
+    assert doc_guards(doc, cfg, now) == ["outdated"]
+    assert doc_guards(doc, cfg, now, feed_date=now - timedelta(days=1)) == []
+
+
+def test_collect_trusts_only_own_feed_dates(cfg, tmp_path, now, monkeypatch) -> None:
+    seen: list[object] = []
+    monkeypatch.setattr(collect, "doc_guards", lambda *a, **k: (seen.append(k.get("feed_date")), ["outdated"])[1])
+
+    class RT:
+        def __init__(self) -> None:
+            self.cfg = cfg
+            self.fetcher = self
+            self.state = State(tmp_path / "s.db")
+            self.board = self
+
+        def fetch(self, url, purpose):
+            from vibe_stack.models import FetchedDoc
+            return FetchedDoc(url=url, final_url=url, ok=True, fetched_at=now, text="t")
+
+        def now(self):
+            return now
+
+        def decision(self, *a, **k):
+            pass
+
+        def add_post(self, rec):
+            return "ref"
+
+    rt = RT()
+    official = Candidate(source="openai-news", source_type="rss", url="https://openai.com/a", title="A",
+                         whitelist=True, published_at=now)
+    hn = Candidate(source="hackernews", source_type="hackernews", url="https://x.dev/b", title="B", published_at=now)
+    for c in (official, hn):
+        assert collect.process_candidate(rt, c, {}) == "rejected"  # type: ignore[arg-type]
+    assert seen == [now, None]
+
+
+def test_urgent_retries_unavailable_page_hourly(tmp_path, now) -> None:
+    state = State(tmp_path / "s.db")
+    state.mark_seen(["u|url:https://openai.com/a"], "a", "fetch_failed", now)
+    assert state.seen_outcome(["u|url:https://openai.com/a"], now + timedelta(minutes=50), 60) == "fetch_failed"
+    assert state.seen_outcome(["u|url:https://openai.com/a"], now + timedelta(minutes=70), 60) is None
+
+
+# --- возврат статьи из архива, страница-список, фильтр адресов, страницы ленты ---------------------------------------
+def test_first_poll_new_rearms_archived_url(tmp_path, now) -> None:
+    """Claude Security первый опрос записал в архив — адрес из first_poll_new становится новым, один раз."""
+    from vibe_stack.sources.sitemap import ARCHIVE, FirstSeen
+    from vibe_stack.timeutil import iso
+
+    state = State(tmp_path / "s.db")
+    url = "https://claude.com/resources/articles/claude-security"
+    state.put("sitemap_first_seen:c", json.dumps({url: iso(ARCHIVE)}))
+    seen = FirstSeen(state, "c", lambda: now, [url])
+    assert seen.date(url) == now
+    seen.save()
+    later = FirstSeen(state, "c", lambda: now + timedelta(days=1), [url])
+    assert later.date(url) == now  # дата первого возврата не сдвигается
+
+
+BLOG = """<html><body><a href="/blog/muse-wonder">Muse Wonder</a> <a href="/blog/muse-wonder">again</a>
+<a href="https://research.meta.ai/blog/muse-spark-open/">Spark</a> <a href="/about">About</a>
+<a href="https://evil.dev/blog/x">x</a></body></html>"""
+
+
+def test_page_links_source(tmp_path, now) -> None:
+    from vibe_stack.sources.sitemap import PageLinksSource
+
+    cfg = SourceConfig(name="meta", type="page_links", url="https://research.meta.ai/blog", path_prefix="/blog/")
+    state = State(tmp_path / "s.db")
+    since = now - timedelta(days=30)
+
+    def poll(page: str, at: datetime) -> list[str]:
+        return [c.url for c in PageLinksSource(cfg, client({"https://research.meta.ai/blog": page}), since, state,
+                                               lambda: at).collect()]
+
+    assert poll(BLOG, now) == []  # первый опрос — архив
+    newer = BLOG.replace("</body>", '<a href="/blog/muse-next">Next</a></body>')
+    assert poll(newer, now + timedelta(hours=3)) == ["https://research.meta.ai/blog/muse-next"]
+    assert PageLinksSource(cfg, client({}), since).collect() == []  # без состояния — ничего
+
+
+CV_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://cerebralvalley.ai/e/built-with-claude-japan2026</loc><lastmod>2026-10-06T08:14:49Z</lastmod></url>
+<url><loc>https://cerebralvalley.ai/e/built-with-claude-japan2026/hackathon/gallery</loc><lastmod>2026-10-06T08:14:49Z</lastmod></url>
+<url><loc>https://cerebralvalley.ai/e/crusoe-recursive-agents-hackathon</loc><lastmod>2026-10-06T04:20:17Z</lastmod></url>
+</urlset>"""
+
+
+def test_hackathons_only_from_known_companies(cfg, now) -> None:
+    s = next(s for s in cfg.sources if s.name == "cerebral-valley-hackathons")
+    got = SitemapSource(s, client({s.url: CV_SITEMAP}), now - timedelta(days=30)).collect()
+    assert [c.url for c in got] == ["https://cerebralvalley.ai/e/built-with-claude-japan2026"]
+
+
+def test_rss_reads_next_pages(cfg) -> None:
+    s = next(s for s in cfg.sources if s.name == "github-changelog")
+    page2 = FEED.replace("HydraFusion updates", "Copilot computer use").replace("changelog/a", "changelog/c")
+    pages = {s.url: FEED, f"{s.url}?paged=2": page2}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=pages[str(req.url)]) if str(req.url) in pages else httpx.Response(404)
+
+    got = RSSSource(s, httpx.Client(transport=httpx.MockTransport(handler))).collect()
+    assert [c.title for c in got] == ["HydraFusion updates", "Copilot computer use"]

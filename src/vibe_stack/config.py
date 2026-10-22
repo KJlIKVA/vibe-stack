@@ -154,6 +154,9 @@ class Fetch(BaseModel):
     user_agent: str = "VibeStackBot/0.1"
     # сайты, которые не пускают роботов из облака: при 403 — последняя копия из web.archive.org (решение 48)
     archive_fallback_hosts: list[str] = Field(default_factory=list)
+    # решение 70: копии страницы в архиве ещё нет — попросить архив её снять (Save Page Now), а не ждать сутки
+    archive_save: bool = True
+    archive_save_timeout_s: float = 90
     # запись changelog о выходе модели дополняется страницей анонса (решение 65): хост changelog → правило
     model_pages: dict[str, ModelPage] = Field(default_factory=dict)
 
@@ -189,8 +192,8 @@ class Rubric(BaseModel):
 
 class SourceConfig(BaseModel):
     name: str
-    type: Literal["rss", "github_releases", "github_search", "github_trending", "hackernews", "sitemap", "md_changelog",
-                  "youtube", "jsonld_list", "openlibrary", "reddit", "fixture"]
+    type: Literal["rss", "github_releases", "github_search", "github_trending", "hackernews", "sitemap", "page_links",
+                  "md_changelog", "youtube", "jsonld_list", "openlibrary", "reddit", "fixture"]
     url: str | None = None
     repo: str | None = None
     path_prefix: str | None = None
@@ -209,9 +212,10 @@ class SourceConfig(BaseModel):
     include_text_regex: list[str] = Field(default_factory=list)
     channels: list[str] = Field(default_factory=list)  # youtube: id каналов UC…
     title_prefix: str = ""  # md_changelog: «OpenAI API: » перед текстом записи
-    # sitemap без lastmod (решение 70): эти адреса при первом опросе — новые, а не архив (Claude Duet вышел за день
-    # до подключения claude.com)
+    # sitemap без lastmod и page_links (решение 70): эти адреса — новые, даже если первый опрос записал их в архив
+    # (Claude Duet, Claude Security и Code Review вышли незадолго до подключения claude.com)
     first_poll_new: list[str] = Field(default_factory=list)
+    pages: int = 1  # rss: сколько страниц ленты читать (?paged=N) — у GitHub changelog в ленте лишь 10 записей
     group_by_day: bool = False  # md_changelog (решение 70): записи одного дня — один пост, а не пост на каждый пункт
     max_age_days: int | None = None  # свой предел свежести вместо gate.max_age_days (changelog: только последние дни)
     min_minutes: int = 0  # youtube: короче — не берём (0 — без ограничения: длину оценивает модель, решение 51)

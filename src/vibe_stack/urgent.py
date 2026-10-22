@@ -85,7 +85,7 @@ def urgent_date(c: Candidate) -> datetime | None:
     (исключение — sitemap: там есть только lastmod, поэтому дату дополнительно сверяем по странице)."""
     if c.published_at:
         return c.published_at
-    return c.updated_at if c.source_type == "sitemap" else None
+    return c.updated_at if c.source_type in ("sitemap", "page_links") else None
 
 
 def run_urgent(rt: Runtime) -> dict[str, Any]:
@@ -199,6 +199,9 @@ def _process(rt: Runtime, c: Candidate, rubric: Rubric) -> str:
     doc = rt.fetcher.fetch(c.url, purpose="score")
     if not doc.ok:
         rt.decision(CONTOUR, c, "fetch", "fetch_failed", ["source_unavailable"], detail={"error": doc.error})
+        # повтор — через час, а не на каждом тике: 17.10 страницу Itaú на openai.com запросили 40 раз за день,
+        # и архив перестал отвечать (решение 70)
+        rt.state.mark_seen(_ukeys(c), c.id, "fetch_failed", now)
         return "fetch_failed"
     c = with_page_title(c, doc)
     published = parse_dt(doc.published_meta)

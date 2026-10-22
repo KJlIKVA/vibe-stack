@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime
 
 import httpx
@@ -25,6 +26,8 @@ class HackerNewsSource:
     def collect(self) -> list[Candidate]:
         out: dict[str, Candidate] = {}
         ts = int(self.since.timestamp())
+        # пустой запрос — все истории с очками от min_points (главная HN); include_text_regex оставляет только про ИИ
+        include = [re.compile(p, re.IGNORECASE) for p in self.cfg.include_text_regex]
         for query in self.cfg.queries:
             r = self.client.get(API, params={
                 "query": query,
@@ -36,6 +39,8 @@ class HackerNewsSource:
             for hit in r.json().get("hits", []):
                 url = hit.get("url")
                 if not url or url in out:  # Ask HN без ссылки — не первоисточник
+                    continue
+                if include and not any(p.search(hit.get("title") or "") for p in include):
                     continue
                 out[url] = Candidate(
                     source=self.name,

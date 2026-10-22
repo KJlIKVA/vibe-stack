@@ -17,7 +17,8 @@ from typing import Any
 from .timeutil import iso, parse_dt
 
 # исходы-ошибки помним недолго: после них стоит попробовать снова, но не каждые 30 минут
-SHORT_TTL = {"board_error": timedelta(hours=6), "llm_error": timedelta(hours=2)}
+SHORT_TTL = {"board_error": timedelta(hours=6), "llm_error": timedelta(hours=2),
+             "fetch_failed": timedelta(hours=1)}  # срочный контур: недоступная страница — повтор через час
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen (

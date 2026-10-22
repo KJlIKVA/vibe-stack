@@ -40,6 +40,8 @@ def build_source(cfg: SourceConfig, client: httpx.Client, clock: Clock, max_age_
             return hackernews.HackerNewsSource(cfg, client, since)
         case "sitemap":
             return sitemap.SitemapSource(cfg, client, since, state, clock)
+        case "page_links":
+            return sitemap.PageLinksSource(cfg, client, since, state, clock)
         case "md_changelog":
             return md_changelog.MarkdownChangelogSource(cfg, client)
         case "youtube":

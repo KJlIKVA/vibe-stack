@@ -20,8 +20,8 @@ from .steps import _SOURCE_RANK, doc_guards, gate, merge_batch, prefilter, verif
 
 log = logging.getLogger(__name__)
 CONTOUR = "collect"
-FEED_TYPES = ("rss", "sitemap", "github_releases", "md_changelog", "youtube", "jsonld_list", "openlibrary",
-              "reddit")
+FEED_TYPES = ("rss", "sitemap", "page_links", "github_releases", "md_changelog", "youtube", "jsonld_list",
+              "openlibrary", "reddit")
 
 
 def run_collect(rt: Runtime) -> dict[str, Any]:
@@ -176,6 +176,8 @@ def collect_half(rt: Runtime) -> str:
     return "am" if rt.now().astimezone(ZoneInfo(rt.tz)).hour < 12 else "pm"
 
 
+# ленты самого издателя: их дата публикации — дата материала (решение 70)
+OWN_FEEDS = ("rss", "md_changelog", "github_releases")
 # у проектов GitHub порядок — по звёздам: дата последнего push у всех активных репозиториев «сегодня» (решение 70)
 POPULARITY_TYPES = ("github_search", "github_trending")
 
@@ -230,7 +232,10 @@ def process_candidate(rt: Runtime, c: Candidate, rubrics: dict[str, Rubric]) -> 
         return "fetch_failed"
     c = with_page_title(c, doc)
     max_age = next((s.max_age_days for s in rt.cfg.sources if s.name == c.source), None)
-    if guards := doc_guards(doc, rt.cfg, rt.now(), max_age, book=c.extra.get("media") == "book"):
+    # дата в ленте самого издателя (RSS, changelog, релизы) — тоже дата публикации; у HN, Reddit и поиска GitHub —
+    # дата находки, а не материала
+    feed_date = c.published_at if c.whitelist and c.source_type in OWN_FEEDS else None
+    if guards := doc_guards(doc, rt.cfg, rt.now(), max_age, book=c.extra.get("media") == "book", feed_date=feed_date):
         return _reject(rt, c, "code_guard", guards)
 
     score: ScoreResult = rt.llm.json("score", prompts.score_prompt(c.for_prompt(), doc.text, rt.today()),

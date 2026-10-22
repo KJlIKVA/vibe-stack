@@ -117,6 +117,16 @@ class HttpFetcher:
                 return r.status_code, ctype, bytes(body).decode(r.encoding or "utf-8", errors="replace"), current
         raise ValueError("слишком много редиректов")
 
+    def _archive_save(self, url: str) -> bool:
+        """Save Page Now: архив загружает страницу со своих адресов (их сайт пускает). Готово — ответ 302 на копию."""
+        try:
+            r = self.client.get(f"https://web.archive.org/save/{url}", timeout=self.cfg.archive_save_timeout_s)
+        except httpx.HTTPError as e:
+            log.info("архив: не удалось сохранить %s: %s", url, e)
+            return False
+        log.info("архив: сохранить %s → %s", url, r.status_code)
+        return r.status_code in (200, 302)
+
     def _generic(self, url: str) -> FetchedDoc:
         fallback = any(same_site(host_of(url), h) for h in self.cfg.archive_fallback_hosts)
         try:
@@ -130,6 +140,10 @@ class HttpFetcher:
             # сайт не пускает роботов из облака или не отвечает (openai.com) — берём последнюю копию страницы
             # из Архива интернета
             a_status, a_ctype, a_raw, _ = self._get(f"https://web.archive.org/web/2id_/{url}")
+            if a_status == 404 and self.cfg.archive_save and self._archive_save(url):
+                # копии ещё нет: свежая новость. Архив снимает страницу сам (решение 70: «OpenAI models are coming
+                # to Google Cloud» сутки не загружалась)
+                a_status, a_ctype, a_raw, _ = self._get(f"https://web.archive.org/web/2id_/{url}")
             if a_status < 400 and a_raw:
                 status, ctype, raw, archived = a_status, a_ctype, a_raw, True
         now = self.clock()
