@@ -1,5 +1,5 @@
 id: "01"
-description: Новый MCP-сервер, README с описанием и установкой, релиз 5 дней назад → публикуется (🧩)
+description: Новый популярный MCP-сервер (тысячи звёзд за две недели), README с описанием и установкой, релиз 5 дней назад → публикуется (🧩)
 scenario: collect
 expected:
   decision: queued
@@ -14,19 +14,20 @@ candidates:
     published_days_ago: 12
     updated_days_ago: 5
     signal: 2.6
-    extra: {stars: 420, topics: [mcp, mcp-server, postgresql]}
+    extra: {stars: 4200, stars_per_day: 350, topics: [mcp, mcp-server, postgresql]}
     document:
       text: |
         [репозиторий GitHub] acme-labs/mcp-postgres-inspector
         Описание: Read-only MCP server that lets AI agents inspect PostgreSQL schemas
-        Звёзды: 420 · Лицензия: MIT · Последний релиз: v0.4.0 (5 дней назад)
+        Звёзды: 4200 · Лицензия: MIT · Последний релиз: v0.4.0 (5 дней назад)
 
         --- README ---
         # mcp-postgres-inspector
 
-        An MCP (Model Context Protocol) server that gives AI agents **read-only** access to your
-        PostgreSQL schema: tables, columns, indexes and foreign keys. The agent can explore the real
-        structure of your database before writing queries or migrations.
+        The official MCP (Model Context Protocol) server from the PostgreSQL project that gives AI agents
+        **read-only** access to your PostgreSQL schema: tables, columns, indexes and foreign keys. The agent
+        can explore the real structure of your database before writing queries or migrations, so Claude Code
+        and Codex stop guessing column names. 4,200 stars in the first 12 days, #1 on GitHub Trending.
 
         ## Install
 
@@ -48,7 +49,7 @@ candidates:
     llm:
       score:
         category: skill_mcp
-        scores: {novelty: 3, usefulness: 4, verifiability: 3, substance: 2, audience_fit: 1}
+        scores: {novelty: 3, usefulness: 4, verifiability: 3, substance: 2, audience_fit: 1, interest: 4}
         hard_stops: []
         reason: Свежий MCP-сервер с понятной установкой и ограничениями, полезен при работе с базами
         claims:

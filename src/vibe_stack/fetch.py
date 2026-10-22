@@ -15,7 +15,7 @@ from .config import Fetch, env
 from .htmltext import html_to_text, page_images, published_from_meta
 from .models import FetchedDoc
 from .sources import reddit
-from .sources.md_changelog import entry_id, md_url, parse_entries
+from .sources.md_changelog import entry_ids, md_url, parse_entries
 from .sources.youtube import api_get as yt_api_get
 from .sources.youtube import duration_minutes, video_id
 from .timeutil import Clock
@@ -84,7 +84,7 @@ class HttpFetcher:
                 return self._github_repo(url, repo)
             if repo and (m := _RELEASE_PATH.match(urlsplit(url).path)):
                 return self._github_release(url, repo, m.group(3))
-            if entry_id(url):
+            if entry_ids(url):
                 return self._changelog_entry(url)
             if video_id(url):
                 return self._youtube(url)
@@ -232,21 +232,28 @@ class HttpFetcher:
 
     # --- changelog в Markdown, YouTube ---------------------------------------------------------------
     def _changelog_entry(self, url: str) -> FetchedDoc:
-        """Одна запись changelog (адрес …/changelog?entry=<id>): документ — текст этой записи."""
+        """Запись changelog (адрес …/changelog?entry=<id>) или записи одного дня (?entries=<id>,<id>, решение 70):
+        документ — текст именно этих записей."""
         status, _, raw, _ = self._get(md_url(url))
         now = self.clock()
-        entry = next((e for e in parse_entries(raw) if e.id == entry_id(url)), None) if status < 400 else None
-        if entry is None:
+        ids = entry_ids(url)
+        by_id = {e.id: e for e in parse_entries(raw)} if status < 400 else {}
+        entries = [by_id[i] for i in ids if i in by_id]
+        if len(entries) != len(ids) or not entries:
             return FetchedDoc(url=url, final_url=url, ok=False, http_status=status or 404, fetched_at=now,
                               error=f"HTTP {status}" if status >= 400 else "запись changelog не найдена")
-        text = f"[запись changelog] {url.split('?')[0]}\n\n{entry.text()}"
+        head = "[запись changelog]" if len(entries) == 1 else f"[записи changelog за день: {len(entries)}]"
+        text = f"{head} {url.split('?')[0]}\n\n" + "\n\n".join(e.text() for e in entries)
         image, figures = None, []
-        for link in self._launch_pages(url, entry.body):
-            if page := self._linked_page(link):
-                text += f"\n\n--- Страница, на которую указывает запись (официальный источник): {link} ---\n{page.text}"
-                image, figures = image or page.image, figures or page.figures
-        return FetchedDoc(url=url, final_url=url, ok=True, http_status=status, fetched_at=now, title=entry.title,
-                          published_meta=entry.day.isoformat(), text=truncate(text, self.cfg.max_doc_chars),
+        for entry in entries:
+            for link in self._launch_pages(url, entry.body):
+                if page := self._linked_page(link):
+                    text += (f"\n\n--- Страница, на которую указывает запись (официальный источник): {link} ---\n"
+                             f"{page.text}")
+                    image, figures = image or page.image, figures or page.figures
+        title = entries[0].title + (f" (+{len(entries) - 1})" if len(entries) > 1 else "")
+        return FetchedDoc(url=url, final_url=url, ok=True, http_status=status, fetched_at=now, title=title,
+                          published_meta=entries[0].day.isoformat(), text=truncate(text, self.cfg.max_doc_chars),
                           image=image, figures=figures)
 
     def _launch_pages(self, url: str, body: str) -> list[str]:

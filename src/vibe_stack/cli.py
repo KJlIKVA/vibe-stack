@@ -158,7 +158,7 @@ def build_runtime(args: argparse.Namespace, cfg: Config, contour: str) -> Runtim
         cfg=cfg, state=state, board=board, tg=tg, notifier=notifier, llm=llm,
         fetcher=HttpFetcher(cfg.fetch, clock), clock=clock, run_id=run_id, out_dir=out_dir, mode=mode,
         channel_id=channel, force=bool(args.force), registry=Registry(http),
-        sources_factory=lambda chosen: [build_source(s, http, clock, cfg.gate.max_age_days) for s in chosen],
+        sources_factory=lambda chosen: [build_source(s, http, clock, cfg.gate.max_age_days, state) for s in chosen],
     )
     state.start_run(run_id, contour, mode, clock())
     return rt

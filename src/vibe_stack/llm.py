@@ -54,7 +54,7 @@ SCHEMAS: dict[str, dict[str, Any]] = {
             "tool", "skill_mcp", "trick", "case", "book_video", "benchmark", "analysis_candidate", "none"]},
         "scores": _obj({
             "novelty": _int_enum(3), "usefulness": _int_enum(5), "verifiability": _int_enum(3),
-            "substance": _int_enum(2), "audience_fit": _int_enum(2),
+            "substance": _int_enum(2), "audience_fit": _int_enum(2), "interest": _int_enum(5),  # решение 70
         }),
         "hard_stops": _HARD_STOPS,
         "reason": _STR,

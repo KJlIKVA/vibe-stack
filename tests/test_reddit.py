@@ -131,9 +131,10 @@ def test_requests_wait_for_reddit_limit_and_retry_429(no_sleep) -> None:
         reddit.get(tired, url)  # ждать 10 минут не будем: источник подождёт следующего сбора
 
 
-def score(category: str, usefulness: int = 4, novelty: int = 3) -> ScoreResult:
+def score(category: str, usefulness: int = 4, novelty: int = 3, interest: int = 4) -> ScoreResult:
     return ScoreResult.model_validate({"id": "x", "category": category, "claims": ["a", "b"], "scores": {
-        "novelty": novelty, "usefulness": usefulness, "verifiability": 2, "substance": 2, "audience_fit": 2}})
+        "novelty": novelty, "usefulness": usefulness, "verifiability": 2, "substance": 2, "audience_fit": 2,
+        "interest": interest}})
 
 
 def test_discussion_gate_is_stricter(cfg) -> None:
@@ -144,6 +145,7 @@ def test_discussion_gate_is_stricter(cfg) -> None:
     assert gate(score("trick", novelty=0), cfg, rubrics, discussion=True).reasons == ["low_score"]  # 11 нужно
     assert gate(score("trick", novelty=0), cfg, rubrics).passed       # у статьи порог прежний: 10 из 15
     assert gate(score("tool", usefulness=3), cfg, rubrics).passed
+    assert gate(score("trick", interest=3), cfg, rubrics, discussion=True).reasons == ["low_interest"]  # решение 70
 
 
 def make_rt(cfg, tmp_path, now, responses) -> Runtime:

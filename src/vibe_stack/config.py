@@ -86,6 +86,9 @@ class Gate(BaseModel):
     discussion: DiscussionGate = Field(default_factory=DiscussionGate)
     # видео и подкасты (решение 68): строже остальных «Книг/видео» — докладов много, в канал только лучшее
     watch: WatchGate = Field(default_factory=WatchGate)
+    # решение 70: в канал — только действительно интересное (interest 0–5). У «Книги/видео» свои пороги пользы
+    min_interest: int = 0
+    min_interest_exempt: list[str] = Field(default_factory=lambda: ["book_video"])
 
 
 class Schedule(BaseModel):
@@ -186,8 +189,8 @@ class Rubric(BaseModel):
 
 class SourceConfig(BaseModel):
     name: str
-    type: Literal["rss", "github_releases", "github_search", "hackernews", "sitemap", "md_changelog", "youtube",
-                  "jsonld_list", "openlibrary", "reddit", "fixture"]
+    type: Literal["rss", "github_releases", "github_search", "github_trending", "hackernews", "sitemap", "md_changelog",
+                  "youtube", "jsonld_list", "openlibrary", "reddit", "fixture"]
     url: str | None = None
     repo: str | None = None
     path_prefix: str | None = None
@@ -201,8 +204,15 @@ class SourceConfig(BaseModel):
     min_points: int = 0
     skip_title_regex: list[str] = Field(default_factory=list)
     include_title_regex: list[str] = Field(default_factory=list)  # непусто — берём только такие заголовки (книги по ИИ)
+    # непусто — берём только записи, где заголовок или описание подходят (решение 70: из служебных лент GitHub
+    # и Google — только про ИИ-инструменты; в trending — только проекты про ИИ)
+    include_text_regex: list[str] = Field(default_factory=list)
     channels: list[str] = Field(default_factory=list)  # youtube: id каналов UC…
     title_prefix: str = ""  # md_changelog: «OpenAI API: » перед текстом записи
+    # sitemap без lastmod (решение 70): эти адреса при первом опросе — новые, а не архив (Claude Duet вышел за день
+    # до подключения claude.com)
+    first_poll_new: list[str] = Field(default_factory=list)
+    group_by_day: bool = False  # md_changelog (решение 70): записи одного дня — один пост, а не пост на каждый пункт
     max_age_days: int | None = None  # свой предел свежести вместо gate.max_age_days (changelog: только последние дни)
     min_minutes: int = 0  # youtube: короче — не берём (0 — без ограничения: длину оценивает модель, решение 51)
     # что за материал (решение 50): у видео, подкастов и книг свои правила оценки «стоит ли это времени»

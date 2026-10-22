@@ -75,7 +75,12 @@ class Candidate(BaseModel):
 
     @property
     def keys(self) -> list[str]:
-        return dedup_keys(self.url, self.title)
+        keys = dedup_keys(self.url, self.title)
+        # решение 70: переименованный репозиторий — тот же проект (anujasid/… и LiCinCan/blender-ai-mcp-addon);
+        # пост из нескольких записей changelog закрывает и каждую запись
+        if (rid := self.extra.get("repo_id")) and "/releases/" not in self.url:
+            keys.append(f"ghid:{rid}")
+        return keys + [k for k in self.extra.get("member_keys", []) if k not in keys]
 
     @property
     def freshest(self) -> datetime | None:
@@ -93,8 +98,8 @@ class Candidate(BaseModel):
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "extra": {k: v for k, v in self.extra.items()
-                      if k in ("stars", "points", "topics", "tag", "license", "media", "minutes", "discussion",
-                              "subreddit")},
+                      if k in ("stars", "stars_per_day", "stars_recent", "age_days", "points", "topics", "tag",
+                              "license", "media", "minutes", "discussion", "subreddit")},
         }
 
 
@@ -126,6 +131,9 @@ class Scores(BaseModel):
     verifiability: int = Field(ge=0, le=3)
     substance: int = Field(ge=0, le=2)
     audience_fit: int = Field(ge=0, le=2)
+    # решение 70: интерес — стоит ли это поста вообще (событие, популярность, тема). Отдельный порог, в сумму из 15
+    # не входит: сумма меряет качество материала, интерес — нужен ли он каналу
+    interest: int = Field(default=0, ge=0, le=5)
 
     @property
     def total(self) -> int:

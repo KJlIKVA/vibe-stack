@@ -32,7 +32,7 @@ candidates:
     llm:
       score:
         category: analysis_candidate
-        scores: {novelty: 2, usefulness: 4, verifiability: 3, substance: 2, audience_fit: 2}
+        scores: {novelty: 2, usefulness: 4, verifiability: 3, substance: 2, audience_fit: 2, interest: 4}
         hard_stops: []
         reason: Статья с тезисом, о котором есть смысл порассуждать; факты проверяемы
         claims:

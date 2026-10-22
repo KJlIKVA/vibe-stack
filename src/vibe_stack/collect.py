@@ -15,6 +15,7 @@ from .llm import BudgetExceeded, LLMError
 from .models import HARD_STOPS, Candidate, PostRecord, ScoreResult, Status
 from .runtime import Runtime
 from .sources import collect_all
+from .sources.md_changelog import day_candidate, entry_ids
 from .steps import _SOURCE_RANK, doc_guards, gate, merge_batch, prefilter, verify, with_page_title, write
 
 log = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
             continue
         passed.append(c)
 
+    passed = group_changelog_days(rt, passed)
     passed = drop_repeated_topics(rt, passed)
     chosen, rest = fair_pick(passed, rt.cfg.collect.max_candidates_to_score, rt.cfg.collect.max_per_source)
     for c in rest:
@@ -153,6 +155,20 @@ def drop_repeated_topics(rt: Runtime, cands: list[Candidate]) -> list[Candidate]
     return [c for c in cands if any(c is k for k in kept)]  # порядок прежний
 
 
+def group_changelog_days(rt: Runtime, cands: list[Candidate]) -> list[Candidate]:
+    """Записи одного дня changelog с group_by_day — один кандидат (решение 70). Уже вышедшие записи (например,
+    срочный пост о новой модели) сюда не попадают: их отсеял дедуп."""
+    grouped = {s.name for s in rt.cfg.sources if s.group_by_day}
+    days: dict[tuple[str, str], list[Candidate]] = {}
+    out: list[Candidate] = []
+    for c in cands:
+        if c.source in grouped and c.published_at and len(entry_ids(c.url)) == 1:
+            days.setdefault((c.source, c.published_at.date().isoformat()), []).append(c)
+        else:
+            out.append(c)
+    return out + [day_candidate(items) for items in days.values()]
+
+
 def collect_half(rt: Runtime) -> str:
     """«am» — утренний сбор, «pm» — дневной (по времени канала)."""
     from zoneinfo import ZoneInfo
@@ -160,10 +176,14 @@ def collect_half(rt: Runtime) -> str:
     return "am" if rt.now().astimezone(ZoneInfo(rt.tz)).hour < 12 else "pm"
 
 
+# у проектов GitHub порядок — по звёздам: дата последнего push у всех активных репозиториев «сегодня» (решение 70)
+POPULARITY_TYPES = ("github_search", "github_trending")
+
+
 def fair_pick(cands: list[Candidate], limit: int, per_source: int) -> tuple[list[Candidate], list[Candidate]]:
     """Источники по очереди, внутри источника — сначала самое свежее (по дню), потом по сигналу (звёзды, очки).
-    Свежее не должно ждать, пока модель оценивает недельный хвост ленты (решение 59). Остальное ждёт
-    следующего запуска."""
+    Свежее не должно ждать, пока модель оценивает недельный хвост ленты (решение 59). Проекты GitHub — сразу по
+    звёздам. Остальное ждёт следующего запуска."""
     def order(c: Candidate) -> tuple[int, float]:
         day = c.freshest.date().toordinal() if c.freshest else 10**7  # без даты (каталог) — как самое свежее
         return (-day, -c.signal)
@@ -171,6 +191,9 @@ def fair_pick(cands: list[Candidate], limit: int, per_source: int) -> tuple[list
     by_source: dict[str, list[Candidate]] = {}
     for c in sorted(cands, key=order):
         by_source.setdefault(c.source, []).append(c)
+    for items in by_source.values():
+        if items[0].source_type in POPULARITY_TYPES:
+            items.sort(key=lambda c: -c.signal)
     chosen: list[Candidate] = []
     rnd = 0
     while len(chosen) < limit and rnd < per_source:

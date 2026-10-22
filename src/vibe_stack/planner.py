@@ -59,6 +59,10 @@ def same_project(a: set[str], b: set[str]) -> bool:
     def names(t: set[str], prefix: str) -> set[str]:
         return {x.split(":", 1)[1] for x in t if x.startswith(prefix)}
 
+    # репозиторий с тем же именем у другого владельца — переименованный или перенесённый проект: 18 и 19.10
+    # anujasid/blender-ai-mcp-addon и LiCinCan/blender-ai-mcp-addon вышли двумя постами (решение 70)
+    if names(a, "proj:") & names(b, "proj:") and not names(a, "repo:") & names(b, "repo:"):
+        return True
     return bool(names(a, "proj:") & names(b, "lead:") or names(b, "proj:") & names(a, "lead:"))
 
 
@@ -253,13 +257,14 @@ def pick_next(
     if not ok:
         return Pick(None, skipped)
 
-    def priority(p: PostRecord) -> tuple[int, int, int, int, float]:
+    def priority(p: PostRecord) -> tuple[int, int, int, int, int, float]:
         need = weekly_min.get(p.rubric, 0) - week_counts.get(p.rubric, 0)
         found = p.found_at.timestamp() if p.found_at else 0.0
         repeat = 1 if last_rubric and p.rubric == last_rubric else 0
         official_first = 0 if p.source_url and is_official(p.source_url) else 1
+        interest = (p.scores or {}).get("interest", 0)
         # 1) рубрики с невыполненной недельной квотой, 2) официальные выпуски (решение 63), 3) другая рубрика, чем
-        # у предыдущего поста, 4) баллы, 5) свежее — раньше (решение 59: важнее, чтобы вышло недавнее)
-        return (0 if need > 0 else 1, official_first, repeat, -(p.score or 0), -found)
+        # у предыдущего поста, 4) интерес (решение 70), 5) баллы, 6) свежее — раньше (решение 59)
+        return (0 if need > 0 else 1, official_first, repeat, -interest, -(p.score or 0), -found)
 
     return Pick(min(ok, key=priority), skipped)

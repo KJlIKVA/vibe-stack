@@ -1,0 +1,39 @@
+id: "19"
+description: Свежая официальная служебная заметка (истекающие токены в GitHub CLI) — проверяемо, но неинтересно → отказ (решение 70)
+scenario: collect
+expected:
+  decision: rejected
+  stage: gate
+  reasons_include: [low_interest]
+  board_statuses: ["Отклонено"]
+candidates:
+  - source: github-changelog
+    source_type: rss
+    url: https://github.blog/changelog/2026-10-21-github-cli-opt-in-to-expiring-auto-refreshing-oauth-tokens
+    title: "GitHub CLI: Opt in to expiring, auto-refreshing OAuth tokens"
+    summary: GitHub CLI can now use expiring OAuth tokens that refresh automatically.
+    published_days_ago: 1
+    whitelist: true
+    official_domains: [github.blog]
+    document:
+      text: |
+        GitHub CLI: Opt in to expiring, auto-refreshing OAuth tokens
+
+        You can now opt in to expiring OAuth tokens in GitHub CLI. Expiring tokens are refreshed
+        automatically, so you no longer need to keep a long-lived token on disk.
+
+        To sign in with expiring tokens, run `gh auth login --expiring`. To turn the mode on for all new
+        sign-ins, run `gh config set expiring_credentials enabled`.
+
+        Scripts and extensions that store the output of `gh auth token` and reuse it later may stop working
+        once the token expires. Use `gh auth setup-git` so Git asks GitHub CLI for credentials on HTTPS
+        operations.
+    llm:
+      score:
+        category: tool
+        scores: {novelty: 3, usefulness: 2, verifiability: 3, substance: 2, audience_fit: 2, interest: 1}
+        hard_stops: []
+        reason: Служебное изменение авторизации GitHub CLI, а не новая возможность для разработки с ИИ
+        claims:
+          - "GitHub CLI — инструмент командной строки GitHub; в нём можно включить истекающие OAuth-токены, которые обновляются автоматически."
+          - "Войти с истекающими токенами можно командой gh auth login --expiring."

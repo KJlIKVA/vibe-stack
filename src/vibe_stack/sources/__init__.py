@@ -23,7 +23,9 @@ class Source(Protocol):
     def collect(self) -> list[Candidate]: ...
 
 
-def build_source(cfg: SourceConfig, client: httpx.Client, clock: Clock, max_age_days: int) -> Source:
+def build_source(cfg: SourceConfig, client: httpx.Client, clock: Clock, max_age_days: int,
+                 state: sitemap.KV | None = None) -> Source:
+    """state — состояние запуска: sitemap без дат помнит, когда впервые увидел адрес (решение 70)."""
     since = clock() - timedelta(days=max_age_days)
     match cfg.type:
         case "rss":
@@ -32,10 +34,12 @@ def build_source(cfg: SourceConfig, client: httpx.Client, clock: Clock, max_age_
             return github.GitHubReleasesSource(cfg, client)
         case "github_search":
             return github.GitHubSearchSource(cfg, client, since)
+        case "github_trending":
+            return github.GitHubTrendingSource(cfg, client)
         case "hackernews":
             return hackernews.HackerNewsSource(cfg, client, since)
         case "sitemap":
-            return sitemap.SitemapSource(cfg, client, since)
+            return sitemap.SitemapSource(cfg, client, since, state, clock)
         case "md_changelog":
             return md_changelog.MarkdownChangelogSource(cfg, client)
         case "youtube":

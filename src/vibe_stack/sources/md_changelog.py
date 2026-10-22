@@ -114,6 +114,31 @@ def entry_id(url: str) -> str | None:
     return (parse_qs(urlsplit(url).query).get("entry") or [None])[0]
 
 
+def entry_ids(url: str) -> list[str]:
+    """Записи кандидата: одна (?entry=<id>) или все записи дня (?entries=<id>,<id>, решение 70)."""
+    q = parse_qs(urlsplit(url).query)
+    if one := (q.get("entry") or [None])[0]:
+        return [one]
+    return [x for x in ((q.get("entries") or [""])[0]).split(",") if x]
+
+
+def day_candidate(items: list[Candidate]) -> Candidate:
+    """Записи одного дня одного changelog — один кандидат (решение 70): 20.10 три пункта release notes Claude о
+    настройках web fetch вышли тремя постами за час. Ключи каждой записи остаются у кандидата: решение по дню
+    закрывает и записи, а пункты, добавленные в тот же день позже, придут следующим кандидатом."""
+    if len(items) == 1:
+        return items[0]
+    first = items[0]
+    page = first.url.split("?")[0]
+    ids = [i for c in items for i in entry_ids(c.url)]
+    return first.model_copy(update={
+        "url": f"{page}?entries={','.join(ids)}",
+        "title": f"{first.title} (+{len(items) - 1})",
+        "summary": "\n\n".join(c.summary for c in items)[:1500],
+        "extra": {**first.extra, "member_keys": [k for c in items for k in c.keys]},
+    })
+
+
 def md_url(page_url: str) -> str:
     """Адрес Markdown-версии страницы: …/changelog → …/changelog.md."""
     parts = urlsplit(page_url)

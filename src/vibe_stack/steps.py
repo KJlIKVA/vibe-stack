@@ -25,7 +25,10 @@ from .timeutil import iso, parse_dt
 log = logging.getLogger(__name__)
 
 # порядок предпочтения ссылки, когда одна новость пришла из нескольких источников
-_SOURCE_RANK = {"rss": 0, "sitemap": 0, "github_releases": 0, "github_search": 1, "hackernews": 2}
+_SOURCE_RANK = {"rss": 0, "sitemap": 0, "github_releases": 0, "github_search": 1, "github_trending": 1,
+                "hackernews": 2}
+# сигналы популярности для оценки интереса (решение 70): из склеенных кандидатов берём наибольший
+_POPULARITY = ("stars", "stars_per_day", "stars_recent", "points")
 
 
 def merge_batch(cands: list[Candidate]) -> list[Candidate]:
@@ -44,9 +47,11 @@ def merge_batch(cands: list[Candidate]) -> list[Candidate]:
     for g in groups:
         best = min(g, key=lambda c: (0 if c.whitelist else 1, _SOURCE_RANK.get(c.source_type, 3), -c.signal))
         if len(g) > 1:
+            popularity = {k: max(c.extra[k] for c in g if c.extra.get(k) is not None)
+                          for k in _POPULARITY if any(c.extra.get(k) is not None for c in g)}
             best = best.model_copy(update={
                 "signal": max(c.signal for c in g),
-                "extra": {**best.extra, "also_from": sorted({c.source for c in g if c is not best})},
+                "extra": {**best.extra, **popularity, "also_from": sorted({c.source for c in g if c is not best})},
             })
         out.append(best)
     return out
@@ -117,7 +122,7 @@ def gate(score: ScoreResult, cfg: Config, rubrics: dict[str, Rubric], discussion
          media: str | None = None) -> GateResult:
     """Сумма и пороги — только здесь, в коде. discussion — обсуждение на Reddit: только приём или кейс и пороги
     строже (решение 64). media — тип кандидата (video, podcast, book): у видео и подкастов пороги строже
-    (решение 68)."""
+    (решение 68). Интерес — отдельный порог: свежее и проверяемое ещё не повод для поста (решение 70)."""
     total = score.scores.total
     reasons: list[str] = list(score.hard_stops)
     rubric = CATEGORY_TO_RUBRIC.get(score.category)
@@ -147,6 +152,8 @@ def gate(score: ScoreResult, cfg: Config, rubrics: dict[str, Rubric], discussion
         reasons.append("low_usefulness")
     if watch and score.scores.audience_fit < watch.min_audience_fit:
         reasons.append("low_audience_fit")
+    if rubric not in cfg.gate.min_interest_exempt and score.scores.interest < cfg.gate.min_interest:
+        reasons.append("low_interest")  # свежее и проверяемое, но не стоит поста (решение 70)
     return GateResult(rubric, total, sorted(set(reasons), key=reasons.index))
 
 

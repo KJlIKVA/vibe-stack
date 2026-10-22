@@ -34,6 +34,7 @@ class RSSSource:
         feed = feedparser.parse(r.content)
         skip = [re.compile(p) for p in self.cfg.skip_title_regex]
         include = [re.compile(p, re.IGNORECASE) for p in self.cfg.include_title_regex]
+        include_text = [re.compile(p, re.IGNORECASE) for p in self.cfg.include_text_regex]
         out = []
         for e in feed.entries[:40]:
             link = e.get("link")
@@ -44,6 +45,8 @@ class RSSSource:
                 continue
             summary_html = e.get("summary") or ""
             _, summary, _ = html_to_text(summary_html) if "<" in summary_html else ("", summary_html, {})
+            if include_text and not any(p.search(f"{title}\n{summary}") for p in include_text):
+                continue
             out.append(Candidate(
                 source=self.name,
                 source_type="rss",

@@ -169,7 +169,8 @@ def test_book_video_needs_high_usefulness(cfg) -> None:
 
     def score(category: str, usefulness: int) -> ScoreResult:
         return ScoreResult.model_validate({"id": "x", "category": category, "scores": {
-            "novelty": 3, "usefulness": usefulness, "verifiability": 3, "substance": 2, "audience_fit": 2}})
+            "novelty": 3, "usefulness": usefulness, "verifiability": 3, "substance": 2, "audience_fit": 2,
+            "interest": 4}})
 
     rubrics = {k: v.model_copy(update={"enabled": True}) for k, v in cfg.rubrics.items()}
     assert gate(score("book_video", 3), cfg, rubrics).reasons == ["low_usefulness"]  # сумма 13 из 15 — мало
@@ -185,7 +186,7 @@ def test_watch_gate_stricter_for_videos_and_podcasts(cfg) -> None:
     def score(category: str = "book_video", *, verifiability: int = 2, audience_fit: int = 2) -> ScoreResult:
         return ScoreResult.model_validate({"id": "x", "category": category, "scores": {
             "novelty": 3, "usefulness": 4, "verifiability": verifiability, "substance": 2,
-            "audience_fit": audience_fit}})
+            "audience_fit": audience_fit, "interest": 4}})
 
     rubrics = {k: v.model_copy(update={"enabled": True}) for k, v in cfg.rubrics.items()}
     # типичный доклад AI Engineer до решения 68: 3 + 4 + 2 + 2 + 1 = 12 — раньше проходил

@@ -55,6 +55,10 @@ gate:
   # видео и подкасты (решение 68): сумма от 13, польза от 4 и audience_fit 2 — понятно и применимо вайбкодеру;
   # книги — по общим порогам «Книги/видео»
   watch: {min_total: 13, min_usefulness: 4, min_audience_fit: 2}
+  # решение 70: только действительно интересное — interest от 4 из 5 (событие недели, заметная новинка, популярный
+  # проект по теме). Сколько постов выйдет за день, не важно. «Книга/видео» — по своим порогам пользы выше
+  min_interest: 4
+  min_interest_exempt: [book_video]
 
 schedule:
   # в channel.tz: каждые 30 минут с 08:00 до 23:30, ночью канал молчит; в слот — не больше одного поста
@@ -192,6 +196,7 @@ sources:
     url: https://developers.openai.com/api/docs/changelog
     title_prefix: "OpenAI API: "
     max_age_days: 3   # в changelog записи за месяцы — новостью считаем только последние дни
+    group_by_day: true  # решение 70: записи одного дня — один пост (срочный контур смотрит каждую отдельно)
     whitelist: true
     model_vendor: true
     official_domains: [openai.com]
@@ -204,6 +209,7 @@ sources:
     url: https://platform.claude.com/docs/en/release-notes/overview
     title_prefix: "Claude API: "
     max_age_days: 3
+    group_by_day: true  # решение 70: 20.10 три пункта о web fetch вышли тремя постами за час
     whitelist: true
     model_vendor: true
     official_domains: [claude.com, anthropic.com]
@@ -217,6 +223,18 @@ sources:
     official_domains: [anthropic.com]
     contours: [collect, urgent]
     # RSS у Anthropic нет. Новая страница в /news/ = кандидат; заголовок и дату публикации код берёт со страницы
+  - name: claude-articles
+    # решение 70: продукты Claude Anthropic анонсирует на claude.com/resources/articles (Claude Duet 21.10, итоги
+    # хакатонов), а не в anthropic.com/news. В sitemap claude.com нет дат: новая страница — адрес, которого не было
+    # при прошлых опросах; дату публикации код сверяет по странице
+    type: sitemap
+    url: https://claude.com/sitemap.xml
+    path_prefix: /resources/articles/
+    first_poll_new: ["https://claude.com/resources/articles/claude-duet"]
+    whitelist: true
+    model_vendor: true
+    official_domains: [claude.com]
+    contours: [collect, urgent]
   - name: anthropic-engineering
     type: sitemap
     url: https://www.anthropic.com/sitemap.xml
@@ -234,6 +252,8 @@ sources:
   - name: github-changelog
     type: rss
     url: https://github.blog/changelog/feed/
+    # решение 70: только про Copilot и ИИ — Dependabot, раннеры, правила веток и токены вайбкодеру неинтересны
+    include_text_regex: ["copilot|\\bagents?\\b|agentic|\\bAI\\b|\\bMCP\\b|\\bLLMs?\\b|\\bmodels?\\b|codex|claude|gemini|spark"]
     whitelist: true
     official_domains: [github.blog]
     contours: [collect, urgent]
@@ -259,6 +279,8 @@ sources:
     # в RSS нет дат — для срочного контура не годится, дату публикации код берёт со страницы
     type: rss
     url: https://developers.googleblog.com/rss/
+    # решение 70: только Gemini, агенты и ИИ-инструменты — TPU, OAuth и компиляторы для edge вайбкодеру неинтересны
+    include_text_regex: ["gemini|gemma|\\bagents?\\b|agentic|\\bADK\\b|\\bMCP\\b|jules|antigravity|AI Studio|stitch|vibe|\\bLLMs?\\b"]
     whitelist: true
     official_domains: [developers.googleblog.com]
     contours: [collect]
@@ -301,10 +323,6 @@ sources:
     # подкаст и статьи о AI-инженерии; у выпусков есть полная расшифровка — по ней можно сверить факты
     type: rss
     url: https://www.latent.space/feed
-    contours: [collect]
-  - name: practical-ai
-    type: rss
-    url: https://changelog.com/practicalai/feed
     contours: [collect]
   - name: youtube
     # YouTube Data API: RSS и страницы YouTube из GitHub Actions закрыты. Работает, только если в секретах GitHub
@@ -400,6 +418,11 @@ sources:
     type: github_releases
     repo: charmbracelet/crush
     contours: [collect]
+  - name: jetbrains-ai
+    # решение 70: блог JetBrains об ИИ — агент Air, модели Mellum, ИИ в IDE; выходит раз в неделю-две
+    type: rss
+    url: https://blog.jetbrains.com/ai/feed/
+    contours: [collect]
   - name: vscode-updates
     # заметки к выпускам VS Code и блог: новости Copilot и агентов в редакторе; сборки Insiders — не выпуск
     type: rss
@@ -408,27 +431,38 @@ sources:
     skip_title_regex: ["(?i)insiders"]
     max_age_days: 14  # выпуск VS Code — каждую неделю: прошлые выпуски в очередь не берём
   - name: simon-willison
+    # решение 70: только статьи — в ленте «everything» были выпуски его плагинов (llm-echo 0.5) и короткие заметки
     type: rss
-    url: https://simonwillison.net/atom/everything/
+    url: https://simonwillison.net/atom/entries/
     whitelist: false
     contours: [collect]
     skip_title_regex: ["^Quoting "]   # короткие цитаты без собственного содержания
   - name: github-search
+    # новые репозитории за месяц, самые звёздные по каждому запросу. Решение 70: ищем по имени, описанию и темам, а
+    # не только по меткам (популярные проекты часто без меток); от 100 звёзд — меньше сырых проектов
     type: github_search
     contours: [collect]
     per_query: 10
-    min_stars: 25
+    min_stars: 100
     queries:
-      - "topic:mcp-server"
-      - "topic:model-context-protocol"
-      - "topic:claude-code"
+      - "claude in:name,description,topics"
+      - "codex in:name,description,topics"
+      - "mcp in:name,description,topics"
       - "topic:agent-skills"
-      - "topic:claude-skills"
-      - "topic:codex-cli"
-      - "topic:ai-agents topic:developer-tools"
+      - "vibe coding in:name,description,topics"
+      - "ai agent in:name,description,topics"
+      - "llm in:name,description,topics"
+      - "gemini in:name,description,topics"
+  - name: github-trending
+    # решение 70: проекты, которые набирают звёзды сейчас (github.com/trending за день и неделю), в том числе старше
+    # месяца. Только про ИИ и не меньше min_stars звёзд за период; о чём проект и интересен ли он — решает оценка
+    type: github_trending
+    contours: [collect]
+    min_stars: 150
+    include_text_regex: ["\\b(AI|LLMs?|agents?|agentic|claude|codex|GPT|MCP|copilot|cursor|gemini|prompts?|RAG|skills?|vibe|models?|chatgpt|openai|anthropic|deepseek|qwen|kimi)\\b"]
   - name: hackernews
     type: hackernews
     contours: [collect]
-    min_points: 60
+    min_points: 100  # решение 70: Show HN на 60 очков — чаще всего проходные проекты
     per_query: 15
     queries: ["Claude Code", "Codex", "MCP server", "AI agent", "vibe coding", "LLM coding"]
