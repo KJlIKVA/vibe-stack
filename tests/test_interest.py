@@ -51,7 +51,7 @@ def test_model_must_return_interest() -> None:
     scores = SCHEMAS["score"]["properties"]["scores"]
     assert "interest" in scores["required"] and scores["properties"]["interest"]["enum"] == list(range(6))
     out = prompts.score_prompt({"id": "x"}, "doc")
-    assert '"interest" 0–5' in out and "что это и кто это сделал" in out
+    assert '"interest" 0–5' in out and "кто это сделал" in out and "не заменяй размытым" in out
 
 
 def test_planner_takes_more_interesting_first(now) -> None:
@@ -72,8 +72,11 @@ def _planner():
 def test_writing_rules_without_dash_glossary() -> None:
     clarity = prompts.load("clarity")
     assert "2–5 словах" not in clarity and "не поясняй" in clarity and "кто это сделал" in clarity
+    # решение 71: главный термин поясняется, лишнее (перечни, ники на GitHub, детали для специалистов) выкидывается
+    assert "реверс-инжиниринга, то есть" in clarity and "Не пересказывай все approved_claims" in clarity
+    assert "просто ник на GitHub" in clarity
     notes = prompts.load("standard_notes")
-    assert "Заголовок называет продукт" in notes
+    assert "Заголовок называет продукт" in notes and "не список возможностей" in notes
 
 
 # --- claude.com: sitemap без дат ---------------------------------------------------------------------------
