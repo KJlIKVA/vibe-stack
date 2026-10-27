@@ -95,7 +95,8 @@ collect:
 urgent:
   max_item_age_hours: 24
   new_model_max_chars: 1200   # пост о новой модели: для чего, сравнение и бенчмарки, цена (решения 47, 65)
-  events: [new_model, major_release, pricing_or_limits_change, vulnerability]
+  # company_milestone (решение 72): IPO, поглощение, смена CEO у компаний, чьи модели и инструменты в канале
+  events: [new_model, major_release, pricing_or_limits_change, vulnerability, company_milestone]
 
 # Картинка поста — большое превью над текстом: главная картинка страницы (og:image) или карточка репозитория
 # GitHub. Для поста о новой модели модель выбирает среди картинок статьи таблицу бенчмарков или цен (решение 47).

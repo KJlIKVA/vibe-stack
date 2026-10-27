@@ -73,7 +73,8 @@ SCHEMAS: dict[str, dict[str, Any]] = {
     "triage": _obj({
         "id": _STR,
         "event": {"type": "string", "enum": [
-            "new_model", "major_release", "pricing_or_limits_change", "vulnerability", "none"]},
+            "new_model", "major_release", "pricing_or_limits_change", "vulnerability",
+            "company_milestone", "none"]},  # company_milestone — решение 72
         "hard_stops": _TRIAGE_STOPS,
         "reason": _STR,
         "claims": _STR_LIST,

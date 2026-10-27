@@ -10,7 +10,7 @@ from vibe_stack.board import BoardUnavailable, LocalBoard, RubricOverride
 from vibe_stack.fetch import FixtureFetcher
 from vibe_stack.fixtures import load_fixtures, run_scenario
 from vibe_stack.llm import SCHEMAS, FakeLLM
-from vibe_stack.models import Status
+from vibe_stack.models import Status, TriageResult
 from vibe_stack.runtime import Runtime
 from vibe_stack.storage import State
 from vibe_stack.telegram import DryRunTelegram, Notifier
@@ -120,3 +120,26 @@ def test_triage_knows_today_and_what_a_major_release_is() -> None:
     assert "Сегодня 15 октября 2026 года." in p and "заметной новинкой" in p
     assert "Claude Tag" in p  # новинки соседних продуктов из тех же заметок выпуск срочным не делают
     assert "outdated" not in SCHEMAS["triage"]["properties"]["hard_stops"]["items"]["enum"]
+
+
+def test_new_model_keeps_eight_claims() -> None:
+    """Решение 72: у новой модели до 8 утверждений, как в промпте U. 26.10 цена GPT-6.1 Terra была шестым
+    утверждением, код оставлял пять, и пост вышел без цены."""
+    claims = [f"утверждение {i}" for i in range(1, 11)]
+    assert len(TriageResult(id="x", event="new_model", claims=claims).claims) == 8
+    assert len(TriageResult(id="x", event="major_release", claims=claims).claims) == 5
+
+
+def test_company_milestone_is_urgent(cfg, tmp_path) -> None:
+    """Решение 72: заявку Anthropic на IPO (S-1, 26.10) триаж назвал event:none — такого события в списке не было."""
+    assert "company_milestone" in cfg.urgent.events
+    assert "company_milestone" in SCHEMAS["triage"]["properties"]["event"]["enum"]
+    p = prompts.triage_prompt({"id": "x"}, "doc", date(2026, 10, 27))
+    assert "S-1" in p and "раунды инвестиций" in p and "Claude for Nonprofits" in p
+    fx = variant()
+    triage = next(k for k in fx.llm if k[0] == "triage")
+    fx.llm[triage] = {**fx.llm[triage], "event": "company_milestone"}
+    res = run_scenario(fx, cfg, NOW, workdir=tmp_path)
+    assert len(res.sent) == 1
+    write_prompt = next(p for step, _, p in res.llm_calls if step == "write")
+    assert "<новая_модель>" not in write_prompt

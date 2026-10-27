@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .urls import canonical_url, dedup_keys, host_of, short_id
 
@@ -24,7 +24,8 @@ HardStop = Literal[
 Category = Literal[
     "tool", "skill_mcp", "trick", "case", "book_video", "benchmark", "analysis_candidate", "none"
 ]
-UrgentEvent = Literal["new_model", "major_release", "pricing_or_limits_change", "vulnerability", "none"]
+UrgentEvent = Literal["new_model", "major_release", "pricing_or_limits_change", "vulnerability",
+                      "company_milestone", "none"]
 
 # категория промпта A → ключ рубрики в config.yaml
 CATEGORY_TO_RUBRIC = {
@@ -185,10 +186,13 @@ class TriageResult(BaseModel):
     def _cut_reason(cls, v: str) -> str:
         return v[:200]
 
-    @field_validator("claims")
-    @classmethod
-    def _cut_claims(cls, v: list[str]) -> list[str]:
-        return [c.strip() for c in v if c.strip()][:5]
+    @model_validator(mode="after")
+    def _cut_claims(self) -> TriageResult:
+        # о новой модели — до 8, как в промпте U: цена и бенчмарки идут после «что это» и «для чего». 26.10 цена
+        # GPT-6.1 Terra была шестым утверждением, и пост вышел без неё (решение 72)
+        limit = 8 if self.event == "new_model" else 5
+        self.claims = [c.strip() for c in self.claims if c.strip()][:limit]
+        return self
 
 
 class PostRecord(BaseModel):
