@@ -8,22 +8,22 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from .board import BoardUnavailable
 from .models import Status
 from .runtime import Runtime
-from .timeutil import local_date
+from .timeutil import report_day
 from .weekly import reason_label
 
 CONTOUR = "digest"
 
 
 def digest_day(rt: Runtime) -> date:
-    """День сводки: запуск в 23:45 или с опозданием после полуночи относится к одному и тому же дню."""
-    return local_date(rt.now() - timedelta(hours=2), rt.tz)
+    """День сводки: запуск в 23:45 и опоздавший запуск утром следующего дня относятся к одному дню."""
+    return report_day(rt.now(), rt.tz)
 
 
 def _n(x: int) -> str:
@@ -108,7 +108,8 @@ def run_digest(rt: Runtime) -> dict[str, Any]:
         summary["status"] = "disabled"
         return summary
     day = digest_day(rt)
-    key = f"digest:{day.isoformat()}"
+    # новое имя ключа (решение 73): под старым «digest:2026-11-02» записана сводка, вышедшая в 04:11 этого дня
+    key = f"digest:day:{day.isoformat()}"
     if rt.already_done(key):
         summary["status"] = "already_sent"
         return summary

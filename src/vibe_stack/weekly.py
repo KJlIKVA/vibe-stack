@@ -14,6 +14,7 @@ from .lint import lint_post
 from .llm import BudgetExceeded, LLMError
 from .runtime import Runtime
 from .telegram import TelegramError
+from .timeutil import report_day, week_sunday
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +54,8 @@ def post_link(rt: Runtime, message_id: int | None) -> str | None:
 
 
 def compute_stats(rt: Runtime) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
-    end = rt.today()
+    # итоги воскресенья, вышедшие ночью в понедельник, — за прошедшую неделю (решение 73)
+    end = min(rt.today(), week_sunday(report_day(rt.now(), rt.tz)))
     start = end - timedelta(days=6)
     # «Слово дня» (отменено решением 56) — не находки из источников: его старые попытки в статистику не идут
     rows = [r for r in rt.state.candidates_between(start, end)
@@ -106,8 +108,8 @@ def run_weekly(rt: Runtime) -> dict[str, Any]:
     if not rubric.enabled:
         summary["status"] = "rubric_disabled"
         return summary
-    year, week, _ = rt.today().isocalendar()
-    done_key = f"weekly:{year}-W{week:02d}"
+    # по воскресенью, а не по номеру недели (решение 73): опоздавшие на понедельник итоги заняли номер новой недели
+    done_key = f"weekly:{week_sunday(report_day(rt.now(), rt.tz)).isoformat()}"
     if rt.already_done(done_key):
         summary["status"] = "already_published_this_week"
         return summary

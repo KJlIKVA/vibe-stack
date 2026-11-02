@@ -46,5 +46,16 @@ def week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
+def report_day(now: datetime, tz: str) -> date:
+    """День, за который отчитывается запуск по расписанию (решение 73): GitHub задерживает запуски на часы, поэтому
+    сводка на 23:45, вышедшая в 04:11, и итоги воскресенья, вышедшие в понедельник в 01:39, — за прошедший день."""
+    return local_date(now - timedelta(hours=12), tz)
+
+
+def week_sunday(d: date) -> date:
+    """Воскресенье недели, в которую попадает d: по нему запоминаем, что итоги этой недели уже вышли."""
+    return week_start(d) + timedelta(days=6)
+
+
 def age_days(dt: datetime | None, now: datetime) -> float | None:
     return (now - dt).total_seconds() / 86400 if dt else None

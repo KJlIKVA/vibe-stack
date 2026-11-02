@@ -15,7 +15,7 @@ from .board import BoardUnavailable
 from .lint import lint_post
 from .runtime import Runtime
 from .telegram import TelegramError
-from .timeutil import week_start
+from .timeutil import report_day, week_start, week_sunday
 
 log = logging.getLogger(__name__)
 CONTOUR = "watchlist"
@@ -38,7 +38,7 @@ def remember_headline(rt: Runtime, message_id: int, post_html: str) -> None:
 
 def build(rt: Runtime) -> tuple[str, int]:
     """(текст подборки, сколько в ней постов) за текущую неделю (с понедельника)."""
-    rows = [r for r in rt.state.published_since(week_start(rt.today()))
+    rows = [r for r in rt.state.published_since(week_start(report_day(rt.now(), rt.tz)))
             if r.rubric == "book_video" and r.tg_message_id and r.tg_message_id > 0]
     items = []
     for r in rows[-MAX_ITEMS:]:
@@ -69,8 +69,7 @@ def run_watchlist(rt: Runtime) -> dict[str, Any]:
     if rubric is None or not rubric.enabled:
         summary["status"] = "rubric_disabled"
         return summary
-    year, week, _ = rt.today().isocalendar()
-    done_key = f"watchlist:{year}-W{week:02d}"
+    done_key = f"watchlist:{week_sunday(report_day(rt.now(), rt.tz)).isoformat()}"  # решение 73, как у итогов недели
     if rt.already_done(done_key):
         summary["status"] = "already_published_this_week"
         return summary

@@ -50,6 +50,19 @@ def test_digest_counts_and_sends_once(cfg, tmp_path) -> None:
     assert len(rt.notifier.sent) == 1
 
 
+def test_run_delayed_until_morning_reports_previous_day(cfg, tmp_path) -> None:
+    """Решение 73: GitHub запускал сводку в 04:11, и она считала только начавшийся день («вышло 0»)."""
+    rt = make_rt(cfg, tmp_path, now=NIGHT + timedelta(hours=5))  # 04:45 МСК следующего дня
+    assert digest_day(rt).isoformat() == "2026-10-07"
+
+
+def test_old_key_of_the_same_date_does_not_block_digest(cfg, tmp_path) -> None:
+    """Решение 73: под старым ключом за эту дату записана сводка, вышедшая утром этого дня."""
+    rt = make_rt(cfg, tmp_path)
+    rt.mark_done("digest:2026-10-07")
+    assert run_digest(rt)["status"] == "sent"
+
+
 def test_late_run_after_midnight_reports_previous_day(cfg, tmp_path) -> None:
     rt = make_rt(cfg, tmp_path, now=NIGHT + timedelta(hours=1, minutes=30))  # 01:15 МСК следующего дня
     assert digest_day(rt).isoformat() == "2026-10-07"

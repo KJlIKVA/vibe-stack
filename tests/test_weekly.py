@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from vibe_stack.board import LocalBoard
 from vibe_stack.fetch import FixtureFetcher
@@ -104,3 +104,23 @@ def test_weekly_only_once_per_week_in_publish_mode(cfg, tmp_path, now) -> None:
     rt.force = True
     rt._settings = None
     assert run_weekly(rt)["status"] == "published"
+
+
+def test_weekly_late_on_monday_counts_past_week_and_next_sunday_still_runs(cfg, tmp_path) -> None:
+    """Решение 73: итоги 01.11 вышли в понедельник в 01:39 и заняли номер новой недели; итоги 08.11 бы не вышли."""
+    late_monday = datetime(2026, 11, 1, 22, 39, tzinfo=UTC)  # 01:39 понедельника 02.11 по Москве
+    next_sunday = datetime(2026, 11, 8, 16, 0, tzinfo=UTC)  # 19:00 воскресенья 08.11 по Москве
+    current = {"now": late_monday}
+    rt = make_rt(cfg, tmp_path, late_monday, {("weekly", "weekly"): WEEKLY})
+    rt.clock = lambda: current["now"]
+    rt.mode = "publish"
+    seed(rt, late_monday)
+    stats, _, _ = compute_stats(rt)
+    assert stats["period"] == "2026-10-26 — 2026-11-01"
+    assert run_weekly(rt)["status"] == "published"
+    assert rt.state.get("done:weekly:2026-11-01") is not None
+    current["now"] = next_sunday
+    rt._settings = None
+    assert run_weekly(rt)["status"] == "published"
+    rt._settings = None
+    assert run_weekly(rt)["status"] == "already_published_this_week"

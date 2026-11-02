@@ -1,0 +1,46 @@
+# Часы публикации (решение 73). Расписание GitHub с 25.10 срабатывает около 5 раз в сутки вместо ~40, поэтому посты
+# копились и выходили парами. Этот запуск сам вызывает tick.yml каждые 30 минут, сразу после слотов плана дня,
+# через 5 часов перезапускает себя. Расписание здесь — только чтобы поднять цепочку, если она оборвётся.
+#
+# Стоп-кран: VIBE_STACK_ENABLED=false (Settings → Variables). Тики и перезапуск проверяют переменную каждый раз.
+name: Часы публикации (каждые 30 минут)
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+# Часы идут в одном экземпляре. Группа своя: vibe-stack-state занята только самими тиками, а не ожиданием.
+concurrency:
+  group: vibe-stack-clock
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  pace:
+    if: vars.VIBE_STACK_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 345  # лимит GitHub на job — 6 часов
+    permissions:
+      actions: write  # только запуск tick.yml и этого файла; чужой контент здесь не обрабатывается
+    steps:
+      - name: Запускать tick.yml в :03 и :33
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          stop=$(( $(date +%s) + 5 * 3600 ))
+          while [ "$(date +%s)" -lt "$stop" ]; do
+            sleep $(( (180 - $(date +%s) % 1800 + 1800) % 1800 ))
+            # один сбой не должен останавливать часы
+            gh workflow run tick.yml -f mode=publish -f chain=true || echo "::warning::tick.yml не запустился"
+            sleep 60
+          done
+
+      # без if: always(): при сбое цепочка не должна крутиться впустую, её поднимет расписание
+      - name: Перезапустить себя
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run clock.yml

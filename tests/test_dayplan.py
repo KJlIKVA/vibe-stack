@@ -87,15 +87,18 @@ def test_rejected_in_notion_is_not_published(cfg, tmp_path) -> None:
     assert run_publish(rt)["status"] == "nothing_to_publish" and rt.tg.sent == []
 
 
-def test_late_tick_publishes_at_most_two(cfg, tmp_path) -> None:
+def test_late_tick_publishes_one_post(cfg, tmp_path) -> None:
+    """Решение 73: посты не выходят парами, даже если тик опоздал."""
     rt = make_rt(cfg, tmp_path, MORNING)
     for i, (title, rubric) in enumerate(zip(["Alpha linter", "Beta tracing", "Gamma deploys"],
                                             ["tool", "trick", "case"], strict=True)):
         add(rt, title, rubric, f"https://d{i}.dev/x",
             planned_at=datetime(2026, 10, 7, 8, 0, tzinfo=MSK) + timedelta(minutes=10 * i))
     at(rt, 8, 45)  # тик опоздал: наступило время трёх постов
-    assert run_publish(rt)["published"] == 2
-    at(rt, 9, 7)
+    assert run_publish(rt)["published"] == 1
+    at(rt, 9, 3)
+    assert run_publish(rt)["published"] == 1
+    at(rt, 9, 33)
     assert run_publish(rt)["published"] == 1
 
 

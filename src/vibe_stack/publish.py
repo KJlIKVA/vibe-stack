@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 CONTOUR = "publish"
 
 
-MAX_PER_TICK = 2  # если тик опоздал и наступило время двух постов, выходят оба, но не больше
+MAX_PER_TICK = 1  # решение 73: посты не выходят парами; опоздавший выйдет следующим тиком или получит новое время
 
 
 def run_publish(rt: Runtime) -> dict[str, Any]:
