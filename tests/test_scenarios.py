@@ -108,3 +108,38 @@ def test_collect_runs_once_per_day_in_publish_mode(cfg, tmp_path) -> None:
     assert run_collect(rt)["queued"] == 1
     rt._settings = None
     assert run_collect(rt)["status"] == "already_ran_today"
+
+
+def test_llm_unavailable_stops_collect_after_first_candidate(cfg, tmp_path) -> None:
+    from vibe_stack.board import LocalBoard
+    from vibe_stack.collect import run_collect
+    from vibe_stack.fetch import FixtureFetcher
+    from vibe_stack.llm import FakeLLM, LLMUnavailable
+    from vibe_stack.runtime import Runtime
+    from vibe_stack.telegram import DryRunTelegram, Notifier
+
+    fx = _get("01")
+    base = fx.candidates[0]
+    second = base.model_copy(update={"url": base.url + "-b", "title": base.title + " B"})
+    fx.documents[second.url] = fx.documents[base.url]
+    fx.candidates = [base, second]
+
+    calls: list[str] = []
+
+    class Down(FakeLLM):
+        def _invoke(self, step, prompt, schema, ctx_id, images=None):
+            calls.append(step)
+            raise LLMUnavailable("score: AuthenticationError: expired_secret_key")
+
+    state = State(tmp_path / "s.db")
+    clock = lambda: NOW  # noqa: E731
+    rt = Runtime(cfg=cfg, state=state, board=LocalBoard(tmp_path / "b.json"), tg=DryRunTelegram(tmp_path / "tg"),
+                 notifier=Notifier(None, None, tmp_path / "a.log"),
+                 llm=Down(cfg.llm, state, "c", clock, "Europe/Moscow", {}),
+                 fetcher=FixtureFetcher(fx.documents, clock), clock=clock, run_id="c", out_dir=tmp_path,
+                 mode="publish", channel_id="@c", sources_factory=lambda _: [], fixture_candidates=fx.candidates)
+    summary = run_collect(rt)
+    assert summary["new"] == 2
+    assert calls == ["score"]
+    assert summary["stopped"] and summary["errors"] == 1
+    assert (tmp_path / "a.log").read_text(encoding="utf-8").count("OPENAI_API_KEY") == 1

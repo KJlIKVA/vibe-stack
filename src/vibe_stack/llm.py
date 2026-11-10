@@ -33,6 +33,11 @@ class LLMError(RuntimeError):
     pass
 
 
+class LLMUnavailable(LLMError):
+    """OpenAI не принимает запросы от аккаунта: ключ истёк, отозван или неверен, нет доступа, кончились деньги.
+    Повтор не поможет до замены ключа или пополнения счёта — контур останавливается, админу оповещение."""
+
+
 def _obj(props: dict[str, Any]) -> dict[str, Any]:
     return {"type": "object", "additionalProperties": False, "properties": props, "required": list(props)}
 
@@ -124,6 +129,10 @@ class LLM:
         """(повторять ли, во что оценить неудачную попытку). По умолчанию — не повторять, $0."""
         return False, Usage()
 
+    def _account_problem(self, exc: Exception) -> bool:
+        """Сбой аккаунта, а не запроса: повторять бессмысленно. По умолчанию — нет."""
+        return False
+
     # --- бюджет ---------------------------------------------------------------------------
     def cost(self, model: str, u: Usage) -> float:
         price = self.cfg.prices_per_1m.get(model)
@@ -174,6 +183,8 @@ class LLM:
                                            input_tokens=estimate.input_tokens, cached_tokens=0,
                                            output_tokens=estimate.output_tokens,
                                            cost_usd=self.cost(step_cfg.model, estimate), ok=False)
+                if self._account_problem(e):
+                    raise LLMUnavailable(f"{step}: {type(e).__name__}: {str(e)[:300]}") from e
                 if retry and attempt + 1 < self.cfg.max_attempts:
                     log.info("llm %s %s: %s, повтор", step, ctx_id, type(e).__name__)
                     self.sleep(3.0 * (attempt + 1))
@@ -236,6 +247,13 @@ class OpenAILLM(LLM):
         if isinstance(exc, openai.InternalServerError):
             return True, Usage(input_tokens=est_in)
         return False, Usage()
+
+    def _account_problem(self, exc: Exception) -> bool:
+        import openai
+
+        if isinstance(exc, openai.AuthenticationError | openai.PermissionDeniedError):
+            return True
+        return isinstance(exc, openai.RateLimitError) and getattr(exc, "code", None) == "insufficient_quota"
 
     def _call(
         self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str, images: list[str] | None = None

@@ -94,6 +94,12 @@ def build_digest(rt: Runtime, day: date) -> str:
         ok = sum(1 for r in done if r["status"] == "ok")
         lines.append(f"🧪 Песочница: запущено {ok} из {len(done)}")
 
+    # ошибки модели за день (по времени канала): сбой ключа иначе не виден в сводке
+    ok_calls, failed_calls = rt.llm.state.llm_call_counts(day)
+    if failed_calls and not ok_calls:
+        lines.append(f"⚠️ Модель не ответила ни разу (ошибок: {failed_calls}) — проверьте ключ OpenAI")
+    elif failed_calls:
+        lines.append(f"⚠️ Модель: ошибок {failed_calls}, удачных вызовов {ok_calls}")
     # токены (сутки UTC — как считает лимит)
     day_start = rt.now().astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     for model, cap in rt.cfg.llm.daily_token_limits.items():

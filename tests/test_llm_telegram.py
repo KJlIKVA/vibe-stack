@@ -278,3 +278,67 @@ def test_split_message_by_paragraphs() -> None:
     assert split_message("коротко") == ["коротко"]
     long_para = "\n".join(["x" * 50] * 100)  # один абзац длиннее лимита — режется по строкам
     assert all(len(p) <= 1000 for p in split_message(long_para, limit=1000))
+
+
+# --- модель недоступна: истёк ключ, нет денег (LLMUnavailable) ---------------------------------
+
+def _openai_error(cls, status: int, body: dict, message: str = "x"):
+    req = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    return cls(message, response=httpx.Response(status, request=req), body=body)
+
+
+def test_expired_key_is_llm_unavailable_without_retry(cfg, tmp_path, now, monkeypatch) -> None:
+    import openai
+
+    from vibe_stack.llm import LLMUnavailable
+
+    calls = []
+
+    def create(**kw):
+        calls.append(1)
+        raise _openai_error(openai.AuthenticationError, 401,
+                            {"code": "expired_secret_key", "message": "expired"}, "expired")
+
+    llm = _openai_llm(cfg, tmp_path, now, monkeypatch, create)
+    with pytest.raises(LLMUnavailable):
+        llm.text("write", "p", "c")
+    assert len(calls) == 1
+    assert llm.state.llm_calls_in_run("r") == 1
+
+
+def test_insufficient_quota_is_llm_unavailable_without_retry(cfg, tmp_path, now, monkeypatch) -> None:
+    import openai
+
+    from vibe_stack.llm import LLMUnavailable
+
+    calls = []
+
+    def create(**kw):
+        calls.append(1)
+        raise _openai_error(openai.RateLimitError, 429,
+                            {"code": "insufficient_quota", "message": "no money"}, "no money")
+
+    llm = _openai_llm(cfg, tmp_path, now, monkeypatch, create)
+    with pytest.raises(LLMUnavailable):
+        llm.text("write", "p", "c")
+    assert len(calls) == 1
+    assert llm.state.llm_calls_in_run("r") == 1
+
+
+def test_ordinary_rate_limit_is_retried_and_not_unavailable(cfg, tmp_path, now, monkeypatch) -> None:
+    import openai
+
+    from vibe_stack.llm import LLMUnavailable
+
+    calls = []
+
+    def create(**kw):
+        calls.append(1)
+        raise _openai_error(openai.RateLimitError, 429,
+                            {"code": "rate_limit_exceeded", "message": "slow down"}, "slow down")
+
+    llm = _openai_llm(cfg, tmp_path, now, monkeypatch, create)
+    with pytest.raises(LLMError) as e:
+        llm.text("write", "p", "c")
+    assert not isinstance(e.value, LLMUnavailable)
+    assert len(calls) == cfg.llm.max_attempts

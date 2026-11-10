@@ -125,6 +125,18 @@ class Runtime:
         if self.mode == "publish":
             self.state.put(f"done:{key}", self.run_id)
 
+    def llm_unavailable(self, contour: str, e: Exception) -> None:
+        """Модель недоступна (LLMUnavailable): оповещение админу не чаще раза в день по времени канала."""
+        key = f"llm_unavailable:{self.today().isoformat()}"
+        if self.state.get(key):
+            return
+        self.state.put(key, "1")
+        self.notifier.notify(
+            f"OpenAI не принимает запросы — {contour} остановлен. Ответ: {str(e)[:200]}. "
+            "Скорее всего истёк ключ или кончились деньги на счёте OpenAI. Замените секрет OPENAI_API_KEY: "
+            "GitHub → Settings → Secrets and variables → Actions. Пока ключ не заменён, сбор и срочные посты стоят; "
+            "следующее напоминание — завтра.")
+
     # --- вывод ---------------------------------------------------------------------------
     def write_out(self, rel: str, content: str) -> Path:
         p = self.out_dir / rel

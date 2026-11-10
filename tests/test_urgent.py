@@ -143,3 +143,26 @@ def test_company_milestone_is_urgent(cfg, tmp_path) -> None:
     assert len(res.sent) == 1
     write_prompt = next(p for step, _, p in res.llm_calls if step == "write")
     assert "<новая_модель>" not in write_prompt
+
+
+def test_llm_unavailable_stops_urgent_and_keeps_candidate_for_next_tick(cfg, tmp_path) -> None:
+    from vibe_stack.llm import LLMUnavailable
+
+    class Down(FakeLLM):
+        def _invoke(self, step, prompt, schema, ctx_id, images=None):
+            if step == "triage":
+                raise LLMUnavailable("triage: AuthenticationError: expired_secret_key")
+            return super()._invoke(step, prompt, schema, ctx_id, images)
+
+    def factory(cfg_, state, run_id, clock, tz, fx):
+        return Down(cfg_.llm, state, run_id, clock, tz, fx.llm)
+
+    fx = variant()
+    res = run_scenario(fx, cfg, NOW, llm_factory=factory, workdir=tmp_path)
+    summary = res.actual["summary"]
+    assert summary["stopped"] and summary["published"] == 0
+    admin = (tmp_path / "admin.log").read_text(encoding="utf-8")
+    assert admin.count("OPENAI_API_KEY") == 1
+    state = State(tmp_path / "state.db")
+    keys = ["u|" + k for k in fx.candidates[0].keys]
+    assert state.seen_outcome(keys, NOW, cfg.dedup.seen_ttl_days) is None

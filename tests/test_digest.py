@@ -46,6 +46,7 @@ def test_digest_counts_and_sends_once(cfg, tmp_path) -> None:
     assert "Ждут вашего одобрения в Notion: 1" in text and "Разбор статьи про агентов" in text
     assert "В очереди: 1 одобренных" in text
     assert "500 000 из 2 000 000 (25%)" in text
+    assert "Модель" not in text  # ошибок модели нет — строки о них не выводятся
     assert run_digest(rt)["status"] == "already_sent"
     assert len(rt.notifier.sent) == 1
 
@@ -66,3 +67,43 @@ def test_old_key_of_the_same_date_does_not_block_digest(cfg, tmp_path) -> None:
 def test_late_run_after_midnight_reports_previous_day(cfg, tmp_path) -> None:
     rt = make_rt(cfg, tmp_path, now=NIGHT + timedelta(hours=1, minutes=30))  # 01:15 МСК следующего дня
     assert digest_day(rt).isoformat() == "2026-10-07"
+
+
+def test_llm_unavailable_notifies_admin_once_a_day(cfg, tmp_path) -> None:
+    from vibe_stack.llm import LLMUnavailable
+
+    rt = make_rt(cfg, tmp_path)
+    err = LLMUnavailable("score: AuthenticationError: expired_secret_key")
+    rt.llm_unavailable("сбор", err)
+    rt.llm_unavailable("сбор", err)
+    assert len(rt.notifier.sent) == 1
+    assert "OPENAI_API_KEY" in rt.notifier.sent[0]
+    rt.clock = lambda: NIGHT + timedelta(days=1)  # следующий день по времени канала
+    rt.llm_unavailable("сбор", err)
+    assert len(rt.notifier.sent) == 2
+
+
+def _failed_calls(rt, n: int, ok: bool) -> None:
+    for _ in range(n):
+        rt.state.record_llm_call(run_id="x", step="score", model="gpt-5.6-terra", now=NIGHT - timedelta(hours=1),
+                                 day=digest_day(rt), input_tokens=0, cached_tokens=0, output_tokens=0,
+                                 cost_usd=0.0, ok=ok)
+
+
+def test_digest_warns_when_model_never_answered(cfg, tmp_path) -> None:
+    from vibe_stack.digest import build_digest
+
+    rt = make_rt(cfg, tmp_path)
+    _failed_calls(rt, 5, ok=False)
+    text = build_digest(rt, digest_day(rt))
+    assert "⚠️ Модель не ответила ни разу (ошибок: 5)" in text
+
+
+def test_digest_counts_model_errors_next_to_successes(cfg, tmp_path) -> None:
+    from vibe_stack.digest import build_digest
+
+    rt = make_rt(cfg, tmp_path)
+    _failed_calls(rt, 3, ok=True)
+    _failed_calls(rt, 2, ok=False)
+    text = build_digest(rt, digest_day(rt))
+    assert "⚠️ Модель: ошибок 2, удачных вызовов 3" in text

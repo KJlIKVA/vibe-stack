@@ -17,7 +17,7 @@ from typing import Any
 from . import images, prompts
 from .board import BoardUnavailable
 from .config import Rubric
-from .llm import BudgetExceeded, LLMError
+from .llm import BudgetExceeded, LLMError, LLMUnavailable
 from .models import Candidate, PostRecord, Status, TriageResult
 from .publish import board_sent_today, publish_post
 from .runtime import Runtime
@@ -139,6 +139,12 @@ def run_urgent(rt: Runtime) -> dict[str, Any]:
         except BudgetExceeded as e:
             rt.notifier.notify(f"срочный контур остановлен: {e}")
             summary["stopped"] = str(e)
+            break
+        except LLMUnavailable as e:
+            # без mark_seen: после замены ключа новость возьмёт следующий тик
+            rt.decision(CONTOUR, c, "error", "error", ["LLMUnavailable"], detail={"error": str(e)[:500]})
+            rt.llm_unavailable("срочный контур", e)
+            summary["stopped"] = str(e)[:300]
             break
         except LLMError as e:
             rt.decision(CONTOUR, c, "error", "error", ["LLMError"], detail={"error": str(e)[:500]})

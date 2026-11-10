@@ -292,6 +292,12 @@ class State:
         q = "SELECT COALESCE(SUM(cost_usd), 0) FROM llm_calls WHERE local_date=?"
         return float(self.db.execute(q, (day.isoformat(),)).fetchone()[0])
 
+    def llm_call_counts(self, day: date) -> tuple[int, int]:
+        """(удачные, неудачные) вызовы модели за день по времени канала."""
+        q = "SELECT COALESCE(SUM(ok = 1), 0), COALESCE(SUM(ok = 0), 0) FROM llm_calls WHERE local_date=?"
+        ok, failed = self.db.execute(q, (day.isoformat(),)).fetchone()
+        return int(ok), int(failed)
+
     def llm_tokens_since(self, model: str, since: datetime) -> int:
         """Токены модели (вход + выход) с момента since; ts в журнале — UTC ISO, сравнение строк корректно."""
         q = ("SELECT COALESCE(SUM(input_tokens + output_tokens), 0) FROM llm_calls "

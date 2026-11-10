@@ -11,7 +11,7 @@ from typing import Any
 from . import dayplan, images, prompts, sandbox
 from .board import BoardUnavailable
 from .config import Rubric
-from .llm import BudgetExceeded, LLMError
+from .llm import BudgetExceeded, LLMError, LLMUnavailable
 from .models import HARD_STOPS, Candidate, PostRecord, ScoreResult, Status
 from .runtime import Runtime
 from .sources import collect_all
@@ -97,6 +97,12 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
             rt.state.mark_seen(c.keys, c.id, "board_error", rt.now())
             rt.notifier.notify(f"сбор остановлен: {e}")
             board_failed = True
+            break
+        except LLMUnavailable as e:
+            summary["errors"] += 1
+            summary["stopped"] = str(e)[:300]
+            rt.decision(CONTOUR, c, "error", "error", ["LLMUnavailable"], detail={"error": str(e)[:500]})
+            rt.llm_unavailable("сбор", e)
             break
         except LLMError as e:
             summary["errors"] += 1
