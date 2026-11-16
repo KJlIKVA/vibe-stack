@@ -22,10 +22,11 @@ def _entry_dt(entry: feedparser.FeedParserDict, *names: str) -> datetime | None:
 
 
 class RSSSource:
-    def __init__(self, cfg: SourceConfig, client: httpx.Client) -> None:
+    def __init__(self, cfg: SourceConfig, client: httpx.Client, archive_timeout_s: float = 90) -> None:
         self.cfg = cfg
         self.name = cfg.name
         self.client = client
+        self.archive_timeout_s = archive_timeout_s
 
     def entries(self) -> list[feedparser.FeedParserDict]:
         """Записи ленты; pages > 1 — ещё и следующие страницы (WordPress ?paged=N): у GitHub changelog в ленте 10
@@ -36,6 +37,12 @@ class RSSSource:
             sep = "&" if "?" in self.cfg.url else "?"
             url = self.cfg.url if page == 1 else f"{self.cfg.url}{sep}paged={page}"
             r = self.client.get(url, follow_redirects=True)
+            if r.status_code == 403 and self.cfg.archive_fallback:
+                # решение 76: Substack не пускает роботов из GitHub Actions — свежая копия ленты из Архива интернета
+                from ..fetch import archive_save
+
+                if snap := archive_save(self.client, url, self.archive_timeout_s):
+                    r = self.client.get(snap, follow_redirects=True)
             if page > 1 and r.status_code == 404:
                 break
             r.raise_for_status()

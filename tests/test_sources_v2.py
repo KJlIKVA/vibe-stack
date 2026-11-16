@@ -659,3 +659,54 @@ def test_pretty_model_names() -> None:
     assert pretty_model("qwen3-max") == "Qwen3 Max"  # два слова — название, а не уровень рассуждения
     assert pretty_model("gpt-4o-2024-05-13") == "GPT-4o 2024-05-13"
     assert pretty_model("Claude Fable 5.1 (Max)") == "Claude Fable 5.1 (Max)"
+
+
+# --- решение 76: лента, закрытая для роботов из облака, — через Архив интернета -------------------
+
+FEED_XML = """<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
+<item><title>Toil is Contextual</title><link>https://newsletter.kentbeck.com/p/toil-is-contextual</link>
+<pubDate>Thu, 12 Nov 2026 10:00:00 GMT</pubDate><description>Про рутину.</description></item>
+</channel></rss>"""
+
+
+def _blocked_feed_client(feed: str, calls: list[str], save_status: int = 302) -> httpx.Client:
+    snap = f"https://web.archive.org/web/20261116031148id_/{feed}"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        u = str(req.url)
+        calls.append(u)
+        if u == feed:
+            return httpx.Response(403)
+        if u == f"https://web.archive.org/save/{feed}":
+            return httpx.Response(save_status, headers={
+                "location": f"https://web.archive.org/web/20261116031148/{feed}"} if save_status == 302 else {})
+        if u == snap:
+            return httpx.Response(200, text=FEED_XML, headers={"content-type": "application/xml"})
+        # «последняя копия» отдаёт старую ленту — её брать нельзя
+        return httpx.Response(200, text="<rss><channel></channel></rss>")
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_blocked_rss_is_read_from_fresh_archive_snapshot() -> None:
+    feed = "https://newsletter.kentbeck.com/feed"
+    calls: list[str] = []
+    src = rss.RSSSource(SourceConfig(name="kent-beck", type="rss", url=feed, archive_fallback=True),
+                        _blocked_feed_client(feed, calls))
+    got = src.collect()
+    assert [c.url for c in got] == ["https://newsletter.kentbeck.com/p/toil-is-contextual"]  # ссылка — оригинал
+    assert calls == [feed, f"https://web.archive.org/save/{feed}",
+                     f"https://web.archive.org/web/20261116031148id_/{feed}"]
+
+
+def test_blocked_rss_without_fallback_or_failed_save_is_source_error() -> None:
+    feed = "https://addyo.substack.com/feed"
+    calls: list[str] = []
+    with pytest.raises(httpx.HTTPStatusError):
+        rss.RSSSource(SourceConfig(name="addy", type="rss", url=feed), _blocked_feed_client(feed, calls)).collect()
+    assert calls == [feed]  # без флага архив не трогаем
+    calls.clear()
+    src = rss.RSSSource(SourceConfig(name="addy", type="rss", url=feed, archive_fallback=True),
+                        _blocked_feed_client(feed, calls, save_status=520))
+    with pytest.raises(httpx.HTTPStatusError):
+        src.collect()  # архив не снял копию — ошибка источника, как раньше (видно в сводке)

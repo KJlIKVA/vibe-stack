@@ -110,7 +110,8 @@ fetch:
   max_doc_chars: 24000
   user_agent: "VibeStackBot/0.1 (+https://github.com/KJlIKVA/vibe-stack)"
   # openai.com отвечает роботам из GitHub Actions 403 — тогда берём последнюю копию страницы из web.archive.org
-  archive_fallback_hosts: [openai.com]
+  # решение 76: и Substack (блоги Kent Beck и Addy Osmani)
+  archive_fallback_hosts: [openai.com, substack.com, newsletter.kentbeck.com]
   # решение 65: запись release notes Claude о выходе модели дополняется её анонсом на anthropic.com (бенчмарки, цена)
   model_pages:
     platform.claude.com: {id: "claude-[a-z]+-[0-9][a-z0-9-]*", url: "https://www.anthropic.com/{id}"}
@@ -430,13 +431,17 @@ sources:
     type: rss
     url: https://lucumr.pocoo.org/feed.atom
     contours: [collect]
+  # решение 76: Substack с 13.10 отвечает роботам из GitHub Actions 403 — лента и статьи берутся через Архив
+  # интернета (Save Page Now); блог Kent Beck переехал с tidyfirst.substack.com
   - name: kent-beck
     type: rss
-    url: https://tidyfirst.substack.com/feed
+    url: https://newsletter.kentbeck.com/feed
+    archive_fallback: true
     contours: [collect]
   - name: addy-osmani
     type: rss
     url: https://addyo.substack.com/feed
+    archive_fallback: true
     contours: [collect]
   # --- новости агентов для кода (решение 64) ---
   - name: amp-news

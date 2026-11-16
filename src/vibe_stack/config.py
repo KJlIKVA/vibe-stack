@@ -217,6 +217,7 @@ class SourceConfig(BaseModel):
     # sitemap без lastmod и page_links (решение 70): эти адреса — новые, даже если первый опрос записал их в архив
     # (Claude Duet, Claude Security и Code Review вышли незадолго до подключения claude.com)
     first_poll_new: list[str] = Field(default_factory=list)
+    archive_fallback: bool = False  # rss: при 403 — свежая копия ленты через Архив интернета (решение 76)
     pages: int = 1  # rss: сколько страниц ленты читать (?paged=N) — у GitHub changelog в ленте лишь 10 записей
     group_by_day: bool = False  # md_changelog (решение 70): записи одного дня — один пост, а не пост на каждый пункт
     max_age_days: int | None = None  # свой предел свежести вместо gate.max_age_days (changelog: только последние дни)
