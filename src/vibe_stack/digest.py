@@ -97,7 +97,7 @@ def build_digest(rt: Runtime, day: date) -> str:
     # ошибки модели за день (по времени канала): сбой ключа иначе не виден в сводке
     ok_calls, failed_calls = rt.llm.state.llm_call_counts(day)
     if failed_calls and not ok_calls:
-        lines.append(f"⚠️ Модель не ответила ни разу (ошибок: {failed_calls}) — проверьте ключ OpenAI")
+        lines.append(f"⚠️ Модель не ответила ни разу (ошибок: {failed_calls}) — проверьте ключ и лимит расходов OpenAI")
     elif failed_calls:
         lines.append(f"⚠️ Модель: ошибок {failed_calls}, удачных вызовов {ok_calls}")
     # токены (сутки UTC — как считает лимит)

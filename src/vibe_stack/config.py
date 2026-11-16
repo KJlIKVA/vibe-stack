@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import os
+from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -250,6 +252,24 @@ class DigestConfig(BaseModel):
     enabled: bool = True  # сводка дня админу (время — cron в .github/workflows/digest.yml)
 
 
+class FreshFloor(BaseModel):
+    """Решение 75: после простоя — только свежее. Пока сегодня (по времени канала) в [since, until], материалы
+    с датой раньше since не берут ни сбор, ни срочный контур, а из очереди их убирают. После until граница
+    выключается сама: книги и видео до gate.max_age_days снова проходят как обычно."""
+
+    since: date | None = None
+    until: date | None = None
+
+    def cuts(self, dt: datetime | None, now: datetime, tz: str) -> bool:
+        """True — материал с датой dt старше границы, а граница сейчас действует. Без даты — не режем."""
+        if self.since is None or dt is None:
+            return False
+        today = now.astimezone(ZoneInfo(tz)).date()
+        if today < self.since or (self.until is not None and today > self.until):
+            return False
+        return dt.astimezone(ZoneInfo(tz)).date() < self.since
+
+
 class Config(BaseModel):
     channel: ChannelConfig = Field(default_factory=ChannelConfig)
     llm: LLMConfig
@@ -268,6 +288,7 @@ class Config(BaseModel):
     sources: list[SourceConfig] = Field(default_factory=list)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     digest: DigestConfig = Field(default_factory=DigestConfig)
+    fresh_floor: FreshFloor = Field(default_factory=FreshFloor)
 
     def rubric(self, key: str) -> Rubric:
         return self.rubrics[key]

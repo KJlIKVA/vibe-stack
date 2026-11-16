@@ -34,8 +34,15 @@ class LLMError(RuntimeError):
 
 
 class LLMUnavailable(LLMError):
-    """OpenAI не принимает запросы от аккаунта: ключ истёк, отозван или неверен, нет доступа, кончились деньги.
-    Повтор не поможет до замены ключа или пополнения счёта — контур останавливается, админу оповещение."""
+    """OpenAI не принимает запросы от аккаунта: ключ истёк, отозван или неверен, нет доступа, кончились деньги,
+    достигнут лимит расходов организации. Повтор не поможет, пока это не исправят в OpenAI, — контур
+    останавливается, админу оповещение.
+
+    kind: "key" — ключ или доступ (401, 403); "quota" — деньги или лимит расходов (429 insufficient_quota)."""
+
+    def __init__(self, message: str, kind: str = "key") -> None:
+        super().__init__(message)
+        self.kind = kind
 
 
 def _obj(props: dict[str, Any]) -> dict[str, Any]:
@@ -129,9 +136,9 @@ class LLM:
         """(повторять ли, во что оценить неудачную попытку). По умолчанию — не повторять, $0."""
         return False, Usage()
 
-    def _account_problem(self, exc: Exception) -> bool:
-        """Сбой аккаунта, а не запроса: повторять бессмысленно. По умолчанию — нет."""
-        return False
+    def _account_problem(self, exc: Exception) -> str | None:
+        """Сбой аккаунта, а не запроса (повторять бессмысленно): "key" или "quota". По умолчанию — нет (None)."""
+        return None
 
     # --- бюджет ---------------------------------------------------------------------------
     def cost(self, model: str, u: Usage) -> float:
@@ -183,8 +190,9 @@ class LLM:
                                            input_tokens=estimate.input_tokens, cached_tokens=0,
                                            output_tokens=estimate.output_tokens,
                                            cost_usd=self.cost(step_cfg.model, estimate), ok=False)
-                if self._account_problem(e):
-                    raise LLMUnavailable(f"{step}: {type(e).__name__}: {str(e)[:300]}") from e
+                kind = self._account_problem(e)
+                if kind:
+                    raise LLMUnavailable(f"{step}: {type(e).__name__}: {str(e)[:300]}", kind) from e
                 if retry and attempt + 1 < self.cfg.max_attempts:
                     log.info("llm %s %s: %s, повтор", step, ctx_id, type(e).__name__)
                     self.sleep(3.0 * (attempt + 1))
@@ -248,12 +256,18 @@ class OpenAILLM(LLM):
             return True, Usage(input_tokens=est_in)
         return False, Usage()
 
-    def _account_problem(self, exc: Exception) -> bool:
+    def _account_problem(self, exc: Exception) -> str | None:
         import openai
 
         if isinstance(exc, openai.AuthenticationError | openai.PermissionDeniedError):
-            return True
-        return isinstance(exc, openai.RateLimitError) and getattr(exc, "code", None) == "insufficient_quota"
+            return "key"
+        # 429 «кончились деньги» и «достигнут лимит расходов организации» приходят с type=insufficient_quota;
+        # code бывает insufficient_quota или organization_spend_limit_exceeded (13.11.2026: код ждал только первый,
+        # и простой до 16.11 шёл без оповещения)
+        if isinstance(exc, openai.RateLimitError) and "insufficient_quota" in (
+                getattr(exc, "type", None), getattr(exc, "code", None)):
+            return "quota"
+        return None
 
     def _call(
         self, step: str, prompt: str, schema: dict[str, Any] | None, ctx_id: str, images: list[str] | None = None

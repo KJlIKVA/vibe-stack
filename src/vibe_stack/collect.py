@@ -63,6 +63,10 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
             if outcome == "published":
                 rt.decision(CONTOUR, c, "dedup", "rejected", ["duplicate:published"])
             continue  # уже видели: в журнал не пишем, чтобы не раздувать статистику
+        if rt.cfg.fresh_floor.cuts(c.freshest, now, rt.cfg.channel.tz):
+            # решение 75: после простоя — только свежее; в «просмотренное», чтобы не вернулось после границы
+            rt.state.mark_seen(c.keys, c.id, "rejected", now)
+            continue
         summary["new"] += 1
         if reasons := prefilter(c, rt.cfg, now):
             rt.decision(CONTOUR, c, "prefilter", "rejected", reasons)
@@ -78,6 +82,7 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
         rt.decision(CONTOUR, c, "deferred", "deferred", ["over_max_candidates_to_score"])
     deadline = time.monotonic() + rt.cfg.collect.max_minutes * 60
     board_failed = False
+    llm_down = False
     for c in chosen:
         if time.monotonic() > deadline:
             summary["stopped"] = f"дедлайн {rt.cfg.collect.max_minutes} мин — остальные кандидаты завтра"
@@ -101,6 +106,7 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
         except LLMUnavailable as e:
             summary["errors"] += 1
             summary["stopped"] = str(e)[:300]
+            llm_down = True
             rt.decision(CONTOUR, c, "error", "error", ["LLMUnavailable"], detail={"error": str(e)[:500]})
             rt.llm_unavailable("сбор", e)
             break
@@ -124,7 +130,8 @@ def run_collect(rt: Runtime) -> dict[str, Any]:
     if not board_failed:
         # время каждому посту на сегодня + «План на сегодня» админу (после дневного сбора — обновлённый)
         summary["plan"] = dayplan.plan_and_report(rt, update=half == "pm")
-    if not board_failed:  # при сбое Notion второй cron-запуск дня попробует ещё раз
+    # при сбое Notion или недоступной модели сбор не засчитан: запасной запуск попробует ещё раз
+    if not board_failed and not llm_down:
         rt.mark_done(done_key)
     return summary
 

@@ -131,11 +131,16 @@ class Runtime:
         if self.state.get(key):
             return
         self.state.put(key, "1")
+        if getattr(e, "kind", "key") == "quota":
+            fix = ("Достигнут лимит расходов организации OpenAI или кончились деньги на счёте; ключ менять не нужно. "
+                   "Поднимите лимит: platform.openai.com/settings/organization/limits, баланс — "
+                   "platform.openai.com/settings/organization/billing. Пока лимит не поднят")
+        else:
+            fix = ("Скорее всего ключ истёк или отозван. Замените секрет OPENAI_API_KEY: "
+                   "GitHub → Settings → Secrets and variables → Actions. Пока ключ не заменён")
         self.notifier.notify(
             f"OpenAI не принимает запросы — {contour} остановлен. Ответ: {str(e)[:200]}. "
-            "Скорее всего истёк ключ или кончились деньги на счёте OpenAI. Замените секрет OPENAI_API_KEY: "
-            "GitHub → Settings → Secrets and variables → Actions. Пока ключ не заменён, сбор и срочные посты стоят; "
-            "следующее напоминание — завтра.")
+            f"{fix}, сбор и срочные посты стоят; следующее напоминание — завтра.")
 
     # --- вывод ---------------------------------------------------------------------------
     def write_out(self, rel: str, content: str) -> Path:

@@ -83,6 +83,17 @@ def test_llm_unavailable_notifies_admin_once_a_day(cfg, tmp_path) -> None:
     assert len(rt.notifier.sent) == 2
 
 
+def test_llm_spend_limit_alert_points_to_openai_limits_not_key(cfg, tmp_path) -> None:
+    from vibe_stack.llm import LLMUnavailable
+
+    rt = make_rt(cfg, tmp_path)
+    rt.llm_unavailable("срочный контур", LLMUnavailable(
+        "triage: RateLimitError: organization_spend_limit_exceeded", "quota"))
+    assert len(rt.notifier.sent) == 1
+    assert "platform.openai.com/settings/organization/limits" in rt.notifier.sent[0]
+    assert "Замените секрет OPENAI_API_KEY" not in rt.notifier.sent[0]
+
+
 def _failed_calls(rt, n: int, ok: bool) -> None:
     for _ in range(n):
         rt.state.record_llm_call(run_id="x", step="score", model="gpt-5.6-terra", now=NIGHT - timedelta(hours=1),

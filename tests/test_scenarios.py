@@ -143,3 +143,35 @@ def test_llm_unavailable_stops_collect_after_first_candidate(cfg, tmp_path) -> N
     assert calls == ["score"]
     assert summary["stopped"] and summary["errors"] == 1
     assert (tmp_path / "a.log").read_text(encoding="utf-8").count("OPENAI_API_KEY") == 1
+    # сбор не засчитан: запасной запуск того же полудня попробует снова, когда OpenAI снова примет запросы
+    assert run_collect(rt).get("status") != "already_ran_today"
+    assert calls == ["score", "score"]
+
+
+def test_fresh_floor_skips_items_published_before_outage(cfg, tmp_path) -> None:
+    """Решение 75: после простоя сбор не берёт материалы раньше границы и помечает их просмотренными."""
+    from datetime import timedelta
+
+    from vibe_stack.board import LocalBoard
+    from vibe_stack.collect import run_collect
+    from vibe_stack.fetch import FixtureFetcher
+    from vibe_stack.llm import FakeLLM
+    from vibe_stack.runtime import Runtime
+    from vibe_stack.telegram import DryRunTelegram, Notifier
+
+    fx = _get("01")
+    old = fx.candidates[0].model_copy(update={"published_at": NOW - timedelta(days=2), "updated_at": None})
+    cfg.fresh_floor.since = (NOW + timedelta(hours=3)).date()  # сегодня по Москве
+    cfg.fresh_floor.until = cfg.fresh_floor.since + timedelta(days=2)
+
+    state = State(tmp_path / "s.db")
+    clock = lambda: NOW  # noqa: E731
+    rt = Runtime(cfg=cfg, state=state, board=LocalBoard(tmp_path / "b.json"), tg=DryRunTelegram(tmp_path / "tg"),
+                 notifier=Notifier(None, None, tmp_path / "a.log"),
+                 llm=FakeLLM(cfg.llm, state, "c", clock, "Europe/Moscow", {}),
+                 fetcher=FixtureFetcher(fx.documents, clock), clock=clock, run_id="c", out_dir=tmp_path,
+                 mode="publish", channel_id="@c", sources_factory=lambda _: [], fixture_candidates=[old])
+    summary = run_collect(rt)
+    assert summary["new"] == 0
+    assert state.seen_outcome(old.keys, NOW, cfg.dedup.seen_ttl_days) == "rejected"
+    assert state.llm_calls_in_run("c") == 0

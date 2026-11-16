@@ -125,7 +125,7 @@ def run_urgent(rt: Runtime) -> dict[str, Any]:
         if rt.state.seen_outcome(c.keys, now, ttl) in ("published", "queued"):
             continue
         when = urgent_date(c)
-        if when is None or now - when > window:
+        if when is None or now - when > window or rt.cfg.fresh_floor.cuts(when, now, rt.cfg.channel.tz):
             rt.state.mark_seen(_ukeys(c), c.id, "too_old", now)
             continue
         summary["checked"] += 1

@@ -137,3 +137,36 @@ def test_bad_board_settings_fail_closed(cfg, tmp_path, now, field, value) -> Non
     approved(rt.board, now)
     assert run_publish(rt)["status"] == "board_unavailable"
     assert rt.tg.sent == []
+
+
+# --- решение 75: после простоя — только свежее ------------------------------------------------------
+
+def test_fresh_floor_window_and_dates(cfg, now) -> None:
+    from datetime import date
+
+    from vibe_stack.config import FreshFloor
+
+    f = FreshFloor(since=date(2026, 10, 7), until=date(2026, 10, 8))
+    tz = "Europe/Moscow"
+    assert f.cuts(now - timedelta(days=1), now, tz)                     # вчерашнее, граница действует
+    assert not f.cuts(now - timedelta(hours=2), now, tz)                # сегодняшнее
+    assert not f.cuts(None, now, tz)                                    # без даты не режем
+    assert not f.cuts(now - timedelta(days=3), now + timedelta(days=2), tz)   # после until граница выключена
+    assert not f.cuts(now - timedelta(days=3), now - timedelta(days=1), tz)   # до since — ещё не включилась
+    assert not FreshFloor().cuts(now - timedelta(days=3), now, tz)      # пусто — выключено
+
+
+def test_fresh_floor_drops_queue_posts_found_before_outage(cfg, tmp_path, now) -> None:
+    from datetime import date
+
+    from vibe_stack.publish import ready_queue
+
+    cfg.fresh_floor.since, cfg.fresh_floor.until = date(2026, 10, 7), date(2026, 10, 8)
+    rt = make_rt(cfg, tmp_path, now)
+    old = rt.board.add_post(PostRecord(title="Old", rubric="tool", status=Status.APPROVED,
+                                       source_url="https://github.com/a/old", source_domain="github.com", score=12,
+                                       found_at=now - timedelta(days=2), html=HTML.format(t="Old", u="https://x")))
+    fresh = approved(rt.board, now)
+    assert [p.ref for p in ready_queue(rt, now)] == [fresh]
+    assert rt.board.get(old).status == Status.REJECTED
+    assert "решение 75" in rt.board.get(old).reject_reason

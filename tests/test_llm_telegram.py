@@ -300,8 +300,9 @@ def test_expired_key_is_llm_unavailable_without_retry(cfg, tmp_path, now, monkey
                             {"code": "expired_secret_key", "message": "expired"}, "expired")
 
     llm = _openai_llm(cfg, tmp_path, now, monkeypatch, create)
-    with pytest.raises(LLMUnavailable):
+    with pytest.raises(LLMUnavailable) as e:
         llm.text("write", "p", "c")
+    assert e.value.kind == "key"
     assert len(calls) == 1
     assert llm.state.llm_calls_in_run("r") == 1
 
@@ -319,8 +320,33 @@ def test_insufficient_quota_is_llm_unavailable_without_retry(cfg, tmp_path, now,
                             {"code": "insufficient_quota", "message": "no money"}, "no money")
 
     llm = _openai_llm(cfg, tmp_path, now, monkeypatch, create)
-    with pytest.raises(LLMUnavailable):
+    with pytest.raises(LLMUnavailable) as e:
         llm.text("write", "p", "c")
+    assert e.value.kind == "quota"
+    assert len(calls) == 1
+    assert llm.state.llm_calls_in_run("r") == 1
+
+
+def test_org_spend_limit_is_llm_unavailable_without_retry(cfg, tmp_path, now, monkeypatch) -> None:
+    """Ответ OpenAI с 13.11.2026 дословно: type=insufficient_quota, code=organization_spend_limit_exceeded."""
+    import openai
+
+    from vibe_stack.llm import LLMUnavailable
+
+    calls = []
+
+    def create(**kw):
+        calls.append(1)
+        raise _openai_error(openai.RateLimitError, 429, {
+            "message": "Your organization has reached its configured enforced spend limit. Update your limit at "
+                       "https://platform.openai.com/settings/organization/limits.",
+            "type": "insufficient_quota", "param": None, "code": "organization_spend_limit_exceeded"},
+            "Error code: 429")
+
+    llm = _openai_llm(cfg, tmp_path, now, monkeypatch, create)
+    with pytest.raises(LLMUnavailable) as e:
+        llm.text("write", "p", "c")
+    assert e.value.kind == "quota"
     assert len(calls) == 1
     assert llm.state.llm_calls_in_run("r") == 1
 

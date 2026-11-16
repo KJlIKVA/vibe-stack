@@ -127,6 +127,10 @@ def _drop_stale_and_published(rt: Runtime, queue: list[PostRecord], now: datetim
         if p.found_at and now - p.found_at > max_age:
             _safe_update(rt, p.ref, status=Status.REJECTED, reject_reason="stale: устарел в очереди")
             continue
+        if rt.cfg.fresh_floor.cuts(p.found_at, now, rt.cfg.channel.tz):
+            _safe_update(rt, p.ref, status=Status.REJECTED,
+                         reject_reason="stale: найден до простоя, выпускаем только свежее (решение 75)")
+            continue
         fresh.append(p)
     return fresh
 
